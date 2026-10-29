@@ -168,7 +168,7 @@ button.metric:hover{border-color:var(--muted);border-top-color:var(--tone)}
 .tree{position:relative;display:grid;grid-template-columns:minmax(180px,230px) 1fr;column-gap:72px;align-items:center}
 .tree-root{position:relative;z-index:1;border:2px solid var(--accent);background:var(--accent-soft);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:6px}
 .tree-root b{font-family:var(--f-display);font-size:15px;line-height:1.3}
-.tree-kids{position:relative;z-index:1;display:flex;flex-direction:column;gap:12px;min-width:0}
+.tree-kids{position:relative;z-index:1;display:flex;flex-direction:column;gap:22px;min-width:0}
 .tree-kid>.tk{border:1px solid var(--line);border-radius:10px;background:var(--surface)}
 .tree-lines{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
 .tree-lines path{fill:none;stroke:var(--accent);stroke-width:2;opacity:.55}
