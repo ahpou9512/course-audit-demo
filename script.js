@@ -1,5 +1,5 @@
 (function(){
-const DAY=864e5, KEY='course-audit-demo-v3';
+const DAY=864e5, KEY='course-audit-demo-v4';
 const CRITERIA=['Search on Dell Learning works','Course Description (PDF) works','Enrollment works','Launch URL works',
   'Course launches on first attempt','No error page','No access denied','Completion recorded'];
 const COLS='HIJKLMNO';
@@ -69,76 +69,6 @@ const shortStatus=s=>({[PV_RES]:'Verify fix',[PV_DIS]:'Verify discontinue'})[s]|
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
 function load(){try{const v=localStorage.getItem(KEY);return v?JSON.parse(v):null}catch(e){return null}}
 function fresh(){S={courses:[],audits:[],tickets:[],logs:[],seq:{t:1001,a:1,c:1,l:1}};save()}
-
-/* ---------- sample data: 10 courses from Master_File, one or more in every stage ---------- */
-function sample(){
-  fresh(); const T=Date.now(), D=n=>T-n*DAY;
-  const L=(ts,actor,courseId,action,detail,extra)=>S.logs.push(Object.assign({id:S.seq.l++,ts,actor,courseId,action,detail:detail||''},extra));
-  const mk=(code,name,type,price,aud,created)=>{const c={id:'C'+S.seq.c++,code,name,type,price,audience:aud,health:'Pending Audit',auditorStatus:'Pending',
-    auditCount:0,lastAudited:null,lastAuditor:null,lockedBy:null,lockedAt:null,cycleAuditId:null,createdAt:created};
-    S.courses.push(c);L(created,'Jordan Lee',c.id,'Course registered','Manual entry');return c};
-  const aud=(c,who,ts,result,crit,issues,note)=>{const a={id:'A'+S.seq.a++,courseId:c.id,auditor:who,date:ts,result,checklist:crit,info:{price:c.price,audience:c.audience},issues:issues||[],note:note||''};S.audits.push(a);return a};
-  const Y='Yes',N='No',NA='N/A', all=[Y,Y,Y,Y,Y,Y,Y,Y], no=(...i)=>all.map((x,j)=>i.includes(j)?N:x);
-  const pass=(c,who,ts,crit=all)=>{aud(c,who,ts,'Passed',crit);c.health='Healthy';c.auditorStatus='Completed';c.auditCount++;c.lastAudited=ts;c.lastAuditor=who;L(ts,who,c.id,'Audit passed',`Iteration ${c.auditCount}`)};
-  const fail=(c,who,ts,crit,issues)=>{const a=aud(c,who,ts,'Failed',crit,issues);c.health='Unhealthy';c.auditorStatus='In Progress';c.cycleAuditId=a.id;
-    const made=issues.map(x=>{const t={id:'TKT-'+S.seq.t++,courseId:c.id,auditId:a.id,category:x.cat,detail:x.desc,status:'New',createdAt:ts,
-      escalatedAt:null,escalatedBy:null,fixDate:null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};S.tickets.push(t);return t});
-    L(ts,who,c.id,'Audit failed',`${made.length} ticket(s) created: ${made.map(t=>t.id+' '+t.category).join(', ')}`,{ticketIds:made.map(t=>t.id)});return made};
-  const TL=(t,ts,actor,action,detail)=>L(ts,actor,t.courseId,action,detail,{ticketId:t.id});
-  const escl=(t,ts)=>{t.status='Escalated';t.escalatedAt=ts;t.escalatedBy='Sam Wong';TL(t,ts,'Sam Wong','Escalated')};
-  const sched=(t,ts,fix,note)=>{t.fixDate=fix;TL(t,ts,'Sam Wong','Fix date set',`TBD → ${week(fix)} (${fmtD(fix)})`);
-    if(note){t.notes.push({ts,by:'Sam Wong',text:note});TL(t,ts,'Sam Wong','Note added',note)}
-    t.status='In Progress';TL(t,ts,'Sam Wong','Status → In Progress','Fix date saved')};
-  const res=(t,ts,note)=>{if(note){t.notes.push({ts,by:'Sam Wong',text:note});TL(t,ts,'Sam Wong','Note added',note)}t.status=PV_RES;TL(t,ts,'Sam Wong','Marked resolved','Sent for auditor verification')};
-  const disc=(t,ts,why)=>{t.notes.push({ts,by:'Sam Wong',text:why});t.status=PV_DIS;t.justification=why;TL(t,ts,'Sam Wong','Proposed discontinuation',why)};
-
-  // Healthy
-  let c=mk('ESCPXD05816','Dell Integrated System for Microsoft Azure Stack HCI Features and Administration','E-Learning','1540','DSP, Partner',D(200));
-  pass(c,'Priya Nair',D(170)); pass(c,'Alex Tan',D(78));
-  c=mk('ESCPXD07885','PowerFlex 5.0 Recorded Knowledge Transfer','E-Learning','0','DSP, Partner',D(110)); pass(c,'Alex Tan',D(100),[Y,NA,Y,Y,Y,Y,Y,Y]);
-  c=mk('ES143DPS00237','Dell RecoverPoint for Virtual Machines Administration Lab','E-Learning','500','Customer, Partner',D(90)); pass(c,'Priya Nair',D(80));
-
-  // To audit
-  mk('ESCPXD08007','Dell AX System for Azure Local Implementation','E-Learning','800','Partner',D(2));
-  mk('ES102SVR00875','Dell PowerEdge M1000e Installation, Implementation and Administration','E-Learning','400','DSP, Partner',D(1));
-
-  // With SELM
-  c=mk('ES302STG00732','Connectrix B-Series Switch Zoning - On Demand','E-Learning','0','DSP',D(80));
-  let t=fail(c,'Priya Nair',D(73),no(5,6),[{cat:'CD PDF',desc:'Course description PDF is missing.'},
-    {cat:'Content',desc:'Page 4 – Dell Learning link returns "An error occurred while processing your request".'}]);
-  escl(t[0],D(15)); sched(t[0],D(14),T+8*DAY,'Waiting for content owner to send the new CD.'); escl(t[1],D(9));
-
-  c=mk('MR-1WN-ECSNWCB','NetWorker CloudBoost and ECS Integrated Solution','E-Learning','300','Customer, DSP, Partner',D(90));
-  fail(c,'Alex Tan',D(3),no(1),[{cat:'CD PDF',desc:'Course description PDF is missing.'}]);
-
-  c=mk('ESSVRD06031','PowerEdge Corrective Maintenance','E-Learning','0','DSP, Partner',D(100));
-  t=fail(c,'Alex Tan',D(94),no(5),[{cat:'Content',desc:'Training material: language folders cannot be opened (nested folder error).'}]);
-  escl(t[0],D(30)); sched(t[0],D(29),D(10)); res(t[0],D(8),'Folders flattened.');
-  t[0].status='Retest Failed';t[0].rejection='Japanese folder still shows the nested-folder error on the Partner test account.';
-  TL(t[0],D(5),'Alex Tan','Retest failed',t[0].rejection);
-
-  // To verify
-  c=mk('ESSVRD07813','17G PowerEdge M7725 Corrective Maintenance','E-Learning','0','TD, DSP',D(75));
-  t=fail(c,'Priya Nair',D(71),no(1),[{cat:'CD PDF',desc:'Course description PDF is an old version.'},
-    {cat:'Content',desc:'Module 3 video references the 16G platform instead of 17G.'}]);
-  escl(t[0],D(16)); sched(t[0],D(15),D(4)); res(t[0],D(3),'New CD uploaded.');
-  escl(t[1],D(16)); sched(t[1],D(15),D(3)); res(t[1],D(1),'Video re-recorded by EDI.');
-
-  // Discontinued
-  c=mk('MR-1WP-VMAXAFNDM','VMAX All Flash and VMAX3 Non-disruptive Migrations','E-Learning','0','Customer, DSP, Partner',D(85));
-  t=fail(c,'Priya Nair',D(80),[N,Y,N,N,N,N,N,N],[{cat:'Course Setup',desc:'Course not found in the catalogue or on Dell Learning; no training material in Docebo.'}]);
-  escl(t[0],D(40)); disc(t[0],D(20),'Product is end-of-life and no source files exist. Recommend retiring the course.');
-  t[0].status=CLOSED;t[0].closedAs='Discontinued';t[0].closedAt=D(18);TL(t[0],D(18),'Alex Tan','Ticket closed','Approved (Discontinued)');
-  c.health='Discontinued';c.auditorStatus='Completed';L(D(18),'Alex Tan',c.id,'Course discontinued','Archived and removed from active queues');
-
-  save();
-}
-function toast(msg){const el=document.createElement('div');el.className='toast';el.textContent=msg;$('#toastHost').append(el);setTimeout(()=>{el.classList.add('out');setTimeout(()=>el.remove(),300)},2400)}
-function log(o){S.logs.push(Object.assign({id:S.seq.l++,ts:Date.now(),actor:user.name},o))}
-function addAudit(c,result,checklist,info,issues,note){
-  const a={id:'A'+S.seq.a++,courseId:c.id,auditor:user.name,date:Date.now(),result,checklist,info,issues:issues||[],note:note||''};
-  S.audits.push(a);return a;
-}
 
 /* ---------- shell ---------- */
 let animTree=false, animatedFor=null, enterAnim=true, rowAnim=true, flashId=null;
@@ -317,7 +247,7 @@ function vDash(){
   const tm=(v,l,t)=>`<div class="metric" style="--tone:var(${t})"><b>${v}</b><span>${l}</span></div>`;
   const from=rptFrom??dayStart(Date.now()-6*DAY), to=rptTo??dayStart(Date.now());
   const inR=S.logs.filter(l=>l.ts>=from&&l.ts<to+DAY), cnt=a=>inR.filter(l=>l.action===a).length;
-  return `<div class="head"><h2>Dashboard</h2><div style="display:flex;gap:6px"><button class="btn sm" data-a="loadSample">Load sample data</button><button class="btn sm" data-a="reset">Clear all data</button></div></div>
+  return `<div class="head"><h2>Dashboard</h2><button class="btn sm" data-a="reset">Clear all data</button></div>
   ${overdue.length?`<div class="alert"><span>⚠</span><div><b>${overdue.length} ticket${overdue.length>1?'s':''} escalated over 7 days with no fix date.</b> SELM and Auditor groups notified: ${overdue.map(t=>`<button class="link" data-a="open" data-id="${t.courseId}">${t.id}</button>`).join(', ')}</div></div>`:''}
   <span class="sec-label">Courses</span>
   <div class="metrics">${m(cs.all,'All courses','--accent','all')}${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to check','--info','verify')}${m(cs.audit,'To audit','--warn','audit')}${m(cs.disc,'Discontinued','--gray','disc')}</div>
@@ -388,8 +318,6 @@ const A={
   close:closeOv,
   reset(){openModal(`<div class="ov-h"><h3>Clear all data?</h3><button class="x" data-a="close" aria-label="Close">×</button></div><div class="ov-b">All courses, audits, tickets and history in this browser will be removed.</div><div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn danger" data-a="doReset">Clear</button></div>`)},
   doReset(){fresh();draft=null;closeOv();go('courses');toast('All data cleared')},
-  loadSample(){openModal(`<div class="ov-h"><h3>Load sample data?</h3><button class="x" data-a="close" aria-label="Close">×</button></div><div class="ov-b">Replaces everything in this browser with 10 sample courses.</div><div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="doSample">Load</button></div>`)},
-  doSample(){sample();draft=null;filter='all';closeOv();go('courses');toast('10 sample courses loaded')},
   startAudit(id){const c=course(id);c.lockedBy=user.name;c.lockedAt=Date.now();c.auditorStatus='In Progress';
     draft={courseId:id,crit:Array(8).fill(null),price:c.price||'',aud:audList(c.audience),issues:[]};save();render();$('#auditForm')?.scrollIntoView({behavior:'smooth',block:'start'})},
   cancelAudit(id){const c=course(id);c.lockedBy=null;c.lockedAt=null;c.auditorStatus='Pending';draft=null;save();render()},
@@ -453,7 +381,7 @@ document.addEventListener('input',e=>{
 document.addEventListener('submit',e=>{if(e.target.id==='auditForm'){e.preventDefault();submitAudit()}});
 
 /* ---------- boot ---------- */
-S=load(); if(!S||!S.seq)sample();
+S=load(); if(!S||!S.seq)fresh();
 // an unfinished audit form does not survive a reload, so release its lock
 S.courses.forEach(c=>{if(c.lockedBy){c.lockedBy=null;c.lockedAt=null;if(!openOf(c.id).length)c.auditorStatus='Pending'}});
 $('#userSel').innerHTML=USERS.map(u=>`<option value="${u.id}">${u.name} · ${u.role}</option>`).join('');
