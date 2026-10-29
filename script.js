@@ -1,0 +1,461 @@
+(function(){
+const DAY=864e5, KEY='course-audit-demo-v3';
+const CRITERIA=['Search on Dell Learning works','Course Description (PDF) works','Enrollment works','Launch URL works',
+  'Course launches on first attempt','No error page','No access denied','Completion recorded'];
+const COLS='HIJKLMNO';
+const AUDIENCES=['Partner','DSP','Customer','Tailored','TD'];
+const CATS=['Content','Edutube','Course Setup','Learning Plan Setup','Pricing','CD PDF','IT issue','Other'];
+const USERS=[
+  {id:'u1',name:'Alex Tan',role:'Auditor'},
+  {id:'u2',name:'Priya Nair',role:'Auditor'},
+  {id:'u3',name:'Sam Wong',role:'SELM'},
+  {id:'u4',name:'Jordan Lee',role:'Course Owner'}];
+const PV_RES='Pending Verification - Resolved', PV_DIS='Pending Verification - Discontinued', CLOSED='Closed / Archived';
+const WORKING=['Escalated','In Progress','Retest Failed'];
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const STAGES=[['all','All'],['audit','To audit'],['issues','With SELM'],['verify','Ready to check'],['healthy','Healthy'],['disc','Discontinued']];
+
+let S, view={name:'courses'}, user=USERS[0], filter='all', catFilter='', rejecting=null, search='', histQ='', rptFrom, rptTo, draft=null;
+
+/* ---------- helpers ---------- */
+const $=s=>document.querySelector(s);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad=n=>String(n).padStart(2,'0');
+const fmtD=t=>{if(!t)return '—';const d=new Date(t);return `${pad(d.getMonth()+1)}-${pad(d.getDate())}-${d.getFullYear()}`};
+const fmtDT=t=>{const d=new Date(t);return `${fmtD(t)} ${pad(d.getHours())}:${pad(d.getMinutes())}`};
+const toInput=t=>{const d=new Date(t);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`};
+const fromInput=s=>s?new Date(s+'T00:00:00').getTime():null;
+const dayStart=t=>{const d=new Date(t);d.setHours(0,0,0,0);return d.getTime()};
+const daysSince=t=>Math.floor((dayStart(Date.now())-dayStart(t))/DAY);
+const week=t=>t?`${MONTHS[new Date(t).getMonth()]}_Wk${Math.ceil(new Date(t).getDate()/7)}`:'TBD';
+const audList=s=>String(s||'').split(',').map(x=>x.trim()).filter(Boolean);
+const course=id=>S.courses.find(c=>c.id===id);
+const ticket=id=>S.tickets.find(t=>t.id===id);
+const ticketsOf=cid=>S.tickets.filter(t=>t.courseId===cid);
+const openOf=cid=>ticketsOf(cid).filter(t=>t.status!==CLOSED);
+const isOverdue=t=>t.status==='Escalated'&&!t.fixDate&&Date.now()-t.escalatedAt>7*DAY;
+const isAud=()=>user.role==='Auditor', isSelm=()=>user.role==='SELM', isOwner=()=>user.role==='Course Owner';
+const readyToVerify=c=>{const o=openOf(c.id);return o.length>0&&o.every(t=>t.status===PV_RES||t.status===PV_DIS)};
+
+function stage(c){
+  if(c.health==='Discontinued')return 'disc';
+  if(c.auditorStatus==='Pending'||c.lockedBy)return 'audit';
+  if(openOf(c.id).length)return readyToVerify(c)?'verify':'issues';
+  return 'healthy';
+}
+function nextStep(c){
+  const st=stage(c), o=openOf(c.id);
+  if(st==='audit'){
+    if(c.lockedBy&&c.lockedBy!==user.name)return [`Being audited by ${c.lockedBy}`,false];
+    if(c.lockedBy)return ['Finish your audit',true];
+    return isAud()?['Start audit',true]:['Waiting for auditor',false];
+  }
+  if(st==='issues'){const n=o.filter(t=>t.status==='New'||WORKING.includes(t.status)).length;
+    return isSelm()?[`${n} ticket${n>1?'s':''} to handle`,true]:['With SELM',false]}
+  if(st==='verify')return isAud()?['Verify fixes',true]:['Waiting for auditor',false];
+  if(st==='healthy')return [`Audited ${daysSince(c.lastAudited)}d ago`,false];
+  return ['Archived',false];
+}
+function tone(s){
+  return ({'Healthy':'t-ok','Passed':'t-ok','Completed':'t-ok',[CLOSED]:'t-gray',
+    'Unhealthy':'t-bad','Failed':'t-bad','Retest Failed':'t-bad',
+    'Pending Audit':'t-warn','Pending':'t-warn','New':'t-warn',
+    'Escalated':'t-info','In Progress':'t-acc','Ready to check':'t-info',[PV_RES]:'t-info',[PV_DIS]:'t-info','Discontinued':'t-gray'})[s]||'t-gray';
+}
+const pill=s=>`<span class="pill ${tone(s)}">${esc(s)}</span>`;
+const healthLabel=c=>stage(c)==='verify'?'Ready to check':c.health;
+const shortStatus=s=>({[PV_RES]:'Verify fix',[PV_DIS]:'Verify discontinue'})[s]||s;
+
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
+function load(){try{const v=localStorage.getItem(KEY);return v?JSON.parse(v):null}catch(e){return null}}
+function fresh(){S={courses:[],audits:[],tickets:[],logs:[],seq:{t:1001,a:1,c:1,l:1}};save()}
+
+/* ---------- sample data: 10 courses from Master_File, one or more in every stage ---------- */
+function sample(){
+  fresh(); const T=Date.now(), D=n=>T-n*DAY;
+  const L=(ts,actor,courseId,action,detail,extra)=>S.logs.push(Object.assign({id:S.seq.l++,ts,actor,courseId,action,detail:detail||''},extra));
+  const mk=(code,name,type,price,aud,created)=>{const c={id:'C'+S.seq.c++,code,name,type,price,audience:aud,health:'Pending Audit',auditorStatus:'Pending',
+    auditCount:0,lastAudited:null,lastAuditor:null,lockedBy:null,lockedAt:null,cycleAuditId:null,createdAt:created};
+    S.courses.push(c);L(created,'Jordan Lee',c.id,'Course registered','Manual entry');return c};
+  const aud=(c,who,ts,result,crit,issues,note)=>{const a={id:'A'+S.seq.a++,courseId:c.id,auditor:who,date:ts,result,checklist:crit,info:{price:c.price,audience:c.audience},issues:issues||[],note:note||''};S.audits.push(a);return a};
+  const Y='Yes',N='No',NA='N/A', all=[Y,Y,Y,Y,Y,Y,Y,Y], no=(...i)=>all.map((x,j)=>i.includes(j)?N:x);
+  const pass=(c,who,ts,crit=all)=>{aud(c,who,ts,'Passed',crit);c.health='Healthy';c.auditorStatus='Completed';c.auditCount++;c.lastAudited=ts;c.lastAuditor=who;L(ts,who,c.id,'Audit passed',`Iteration ${c.auditCount}`)};
+  const fail=(c,who,ts,crit,issues)=>{const a=aud(c,who,ts,'Failed',crit,issues);c.health='Unhealthy';c.auditorStatus='In Progress';c.cycleAuditId=a.id;
+    const made=issues.map(x=>{const t={id:'TKT-'+S.seq.t++,courseId:c.id,auditId:a.id,category:x.cat,detail:x.desc,status:'New',createdAt:ts,
+      escalatedAt:null,escalatedBy:null,fixDate:null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};S.tickets.push(t);return t});
+    L(ts,who,c.id,'Audit failed',`${made.length} ticket(s) created: ${made.map(t=>t.id+' '+t.category).join(', ')}`,{ticketIds:made.map(t=>t.id)});return made};
+  const TL=(t,ts,actor,action,detail)=>L(ts,actor,t.courseId,action,detail,{ticketId:t.id});
+  const escl=(t,ts)=>{t.status='Escalated';t.escalatedAt=ts;t.escalatedBy='Sam Wong';TL(t,ts,'Sam Wong','Escalated')};
+  const sched=(t,ts,fix,note)=>{t.fixDate=fix;TL(t,ts,'Sam Wong','Fix date set',`TBD → ${week(fix)} (${fmtD(fix)})`);
+    if(note){t.notes.push({ts,by:'Sam Wong',text:note});TL(t,ts,'Sam Wong','Note added',note)}
+    t.status='In Progress';TL(t,ts,'Sam Wong','Status → In Progress','Fix date saved')};
+  const res=(t,ts,note)=>{if(note){t.notes.push({ts,by:'Sam Wong',text:note});TL(t,ts,'Sam Wong','Note added',note)}t.status=PV_RES;TL(t,ts,'Sam Wong','Marked resolved','Sent for auditor verification')};
+  const disc=(t,ts,why)=>{t.notes.push({ts,by:'Sam Wong',text:why});t.status=PV_DIS;t.justification=why;TL(t,ts,'Sam Wong','Proposed discontinuation',why)};
+
+  // Healthy
+  let c=mk('ESCPXD05816','Dell Integrated System for Microsoft Azure Stack HCI Features and Administration','E-Learning','1540','DSP, Partner',D(200));
+  pass(c,'Priya Nair',D(170)); pass(c,'Alex Tan',D(78));
+  c=mk('ESCPXD07885','PowerFlex 5.0 Recorded Knowledge Transfer','E-Learning','0','DSP, Partner',D(110)); pass(c,'Alex Tan',D(100),[Y,NA,Y,Y,Y,Y,Y,Y]);
+  c=mk('ES143DPS00237','Dell RecoverPoint for Virtual Machines Administration Lab','E-Learning','500','Customer, Partner',D(90)); pass(c,'Priya Nair',D(80));
+
+  // To audit
+  mk('ESCPXD08007','Dell AX System for Azure Local Implementation','E-Learning','800','Partner',D(2));
+  mk('ES102SVR00875','Dell PowerEdge M1000e Installation, Implementation and Administration','E-Learning','400','DSP, Partner',D(1));
+
+  // With SELM
+  c=mk('ES302STG00732','Connectrix B-Series Switch Zoning - On Demand','E-Learning','0','DSP',D(80));
+  let t=fail(c,'Priya Nair',D(73),no(5,6),[{cat:'CD PDF',desc:'Course description PDF is missing.'},
+    {cat:'Content',desc:'Page 4 – Dell Learning link returns "An error occurred while processing your request".'}]);
+  escl(t[0],D(15)); sched(t[0],D(14),T+8*DAY,'Waiting for content owner to send the new CD.'); escl(t[1],D(9));
+
+  c=mk('MR-1WN-ECSNWCB','NetWorker CloudBoost and ECS Integrated Solution','E-Learning','300','Customer, DSP, Partner',D(90));
+  fail(c,'Alex Tan',D(3),no(1),[{cat:'CD PDF',desc:'Course description PDF is missing.'}]);
+
+  c=mk('ESSVRD06031','PowerEdge Corrective Maintenance','E-Learning','0','DSP, Partner',D(100));
+  t=fail(c,'Alex Tan',D(94),no(5),[{cat:'Content',desc:'Training material: language folders cannot be opened (nested folder error).'}]);
+  escl(t[0],D(30)); sched(t[0],D(29),D(10)); res(t[0],D(8),'Folders flattened.');
+  t[0].status='Retest Failed';t[0].rejection='Japanese folder still shows the nested-folder error on the Partner test account.';
+  TL(t[0],D(5),'Alex Tan','Retest failed',t[0].rejection);
+
+  // To verify
+  c=mk('ESSVRD07813','17G PowerEdge M7725 Corrective Maintenance','E-Learning','0','TD, DSP',D(75));
+  t=fail(c,'Priya Nair',D(71),no(1),[{cat:'CD PDF',desc:'Course description PDF is an old version.'},
+    {cat:'Content',desc:'Module 3 video references the 16G platform instead of 17G.'}]);
+  escl(t[0],D(16)); sched(t[0],D(15),D(4)); res(t[0],D(3),'New CD uploaded.');
+  escl(t[1],D(16)); sched(t[1],D(15),D(3)); res(t[1],D(1),'Video re-recorded by EDI.');
+
+  // Discontinued
+  c=mk('MR-1WP-VMAXAFNDM','VMAX All Flash and VMAX3 Non-disruptive Migrations','E-Learning','0','Customer, DSP, Partner',D(85));
+  t=fail(c,'Priya Nair',D(80),[N,Y,N,N,N,N,N,N],[{cat:'Course Setup',desc:'Course not found in the catalogue or on Dell Learning; no training material in Docebo.'}]);
+  escl(t[0],D(40)); disc(t[0],D(20),'Product is end-of-life and no source files exist. Recommend retiring the course.');
+  t[0].status=CLOSED;t[0].closedAs='Discontinued';t[0].closedAt=D(18);TL(t[0],D(18),'Alex Tan','Ticket closed','Approved (Discontinued)');
+  c.health='Discontinued';c.auditorStatus='Completed';L(D(18),'Alex Tan',c.id,'Course discontinued','Archived and removed from active queues');
+
+  save();
+}
+function toast(msg){const el=document.createElement('div');el.className='toast';el.textContent=msg;$('#toastHost').append(el);setTimeout(()=>{el.classList.add('out');setTimeout(()=>el.remove(),300)},2400)}
+function log(o){S.logs.push(Object.assign({id:S.seq.l++,ts:Date.now(),actor:user.name},o))}
+function addAudit(c,result,checklist,info,issues,note){
+  const a={id:'A'+S.seq.a++,courseId:c.id,auditor:user.name,date:Date.now(),result,checklist,info,issues:issues||[],note:note||''};
+  S.audits.push(a);return a;
+}
+
+/* ---------- shell ---------- */
+let animTree=false, animatedFor=null, enterAnim=true, rowAnim=true, flashId=null;
+function drawLines(){
+  const tr=$('#tree'),svg=$('#treeLines');if(!tr||!svg||getComputedStyle(svg).display==='none')return;
+  const root=tr.querySelector('.tree-root'),kids=tr.querySelector('.tree-kids');
+  const x1=root.offsetLeft+root.offsetWidth, y1=root.offsetTop+root.offsetHeight/2, x2=kids.offsetLeft;
+  svg.innerHTML=[...kids.children].map((k,i)=>{const y2=kids.offsetTop+k.offsetTop+26, mx=(x1+x2)/2;
+    return `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" style="--i:${i}"/><circle cx="${x2}" cy="${y2}" r="4" style="--i:${i}"/>`}).join('');
+  svg.querySelectorAll('path').forEach(p=>p.style.setProperty('--len',p.getTotalLength()));
+}
+window.addEventListener('resize',drawLines);
+function render(){
+  if(view.name==='course'){animTree=animatedFor!==view.id;animatedFor=view.id}else{animTree=false;animatedFor=null}
+  const cur=view.name==='course'?'courses':view.name;
+  $('#tabs').innerHTML=[['courses','Courses'],['dashboard','Dashboard'],['history','History']]
+    .map(([k,l])=>`<button class="tab" data-a="go" data-id="${k}" aria-current="${cur===k}">${l}</button>`).join('');
+  $('#view').innerHTML=({courses:vCourses,course:vCourse,dashboard:vDash,history:vHistory})[view.name]();
+  if(view.name==='course'&&draft)renderIssues();
+  drawLines();
+  if(enterAnim){const v=$('#view');v.classList.remove('enter');void v.offsetWidth;v.classList.add('enter');enterAnim=false}
+  rowAnim=false;flashId=null;
+  if(animTree)setTimeout(()=>$('#tree')?.classList.remove('anim'),1600);
+}
+function go(name,id){view={name,id};enterAnim=true;rowAnim=true;render();window.scrollTo(0,0)}
+
+/* ---------- courses list ---------- */
+function vCourses(){
+  const counts={};STAGES.forEach(([k])=>counts[k]=0);
+  S.courses.forEach(c=>{counts.all++;counts[stage(c)]++});
+  const q=search.trim().toLowerCase();
+  const list=S.courses.filter(c=>(filter==='all'||stage(c)===filter)&&(!q||(c.code+' '+c.name).toLowerCase().includes(q))
+      &&(!catFilter||openOf(c.id).some(t=>t.category===catFilter)))
+    .sort((a,b)=>(nextStep(b)[1]-nextStep(a)[1])||b.createdAt-a.createdAt);
+  const canAdd=isAud()||isOwner();
+  return `<div class="head"><h2>Courses</h2>${canAdd?`<button class="btn primary" data-a="addCourse">+ Add course</button>`:''}</div>
+  <div class="toolbar"><div class="chips-bar">${STAGES.map(([k,l])=>`<button class="fchip" data-a="filter" data-id="${k}" aria-pressed="${filter===k}">${l} <b>${counts[k]}</b></button>`).join('')}</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><select id="catFilter" aria-label="Filter by issue category"><option value="">All categories</option>${CATS.map(x=>`<option${catFilter===x?' selected':''}>${x}</option>`).join('')}</select>
+    <input type="search" id="search" placeholder="Search code or name" value="${esc(search)}" aria-label="Search courses"></div></div>
+  <div class="tbl-wrap"><table><thead><tr><th>Course</th><th>Status</th><th>Issue categories</th><th>Last audited</th><th>Next step</th></tr></thead><tbody>
+  ${list.length?list.map((c,i)=>{const [txt,me]=nextStep(c);const o=openOf(c.id);return `<tr class="click${rowAnim?' row-in':''}" style="--i:${Math.min(i,12)}" data-a="open" data-id="${c.id}" tabindex="0">
+    <td><div class="cname"><span class="mono">${esc(c.code)}</span><b>${esc(c.name)}</b></div></td>
+    <td>${pill(healthLabel(c))}</td>
+    <td>${o.length?`<div class="catlist">${o.map(t=>`<div class="ci" title="${t.id}"><span class="dot ${tone(t.status)}"></span><span class="cn">${esc(t.category)}</span>
+      <span class="cs${isOverdue(t)?' late':''}">${esc(shortStatus(t.status))}${isOverdue(t)?` · ${daysSince(t.escalatedAt)}d no fix date`:''}</span></div>`).join('')}</div>`:'<span class="muted">—</span>'}</td>
+    <td class="mono nowrap">${fmtD(c.lastAudited)}</td>
+    <td><span class="next${me?' me':''}">${esc(txt)}</span></td></tr>`}).join('')
+  :`<tr><td colspan="5" class="empty">${S.courses.length?'No courses match.':'No courses yet. Add the first one with “+ Add course”.'}</td></tr>`}
+  </tbody></table></div>`;
+}
+
+/* ---------- course page ---------- */
+function vCourse(){
+  const c=course(view.id); if(!c){view={name:'courses'};return vCourses()}
+  const st=stage(c), open=openOf(c.id), closed=ticketsOf(c.id).filter(t=>t.status===CLOSED);
+  const runs=S.audits.filter(a=>a.courseId===c.id).sort((a,b)=>b.date-a.date);
+  let btn='';
+  if(st==='audit'&&isAud()&&!c.lockedBy)btn=`<button class="btn primary" data-a="startAudit" data-id="${c.id}">Start audit</button>`;
+  else if(st==='audit'&&c.lockedBy&&c.lockedBy!==user.name)btn=`<span class="muted small">🔒 Being audited by ${esc(c.lockedBy)}</span>`;
+  else if(st==='healthy'&&(isAud()||isOwner()))btn=`<button class="btn" data-a="reaudit" data-id="${c.id}">Queue re-audit</button>`;
+  else if(st==='audit'&&!isAud())btn=`<span class="muted small">Waiting for an auditor</span>`;
+  const stats=`<div class="stats"><span>Audits <b>${c.auditCount}</b></span><span>Last audited <b>${fmtD(c.lastAudited)}</b>${c.lastAudited?` (${daysSince(c.lastAudited)}d ago)`:''}</span>
+      <span>By <b>${esc(c.lastAuditor||'—')}</b></span><span>Pricing <b>${esc(c.price||'—')}</b></span><span>Audience <b>${esc(c.audience||'—')}</b></span></div>`;
+  return `<button class="link back" data-a="go" data-id="courses">← All courses</button>
+  ${open.length?'':`<div class="panel"><div class="chead"><div style="display:flex;flex-direction:column;gap:6px">
+      <span class="mono muted">${esc(c.code)} · ${esc(c.type)}</span><h2>${esc(c.name)}</h2>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">${pill(healthLabel(c))}${st==='audit'&&c.health==='Healthy'?pill('Re-audit queued'):''}</div></div>${btn}</div>
+    ${stats}</div>`}
+  ${draft&&draft.courseId===c.id&&c.lockedBy===user.name?auditForm(c):''}
+  ${open.length?`<div class="panel"><div class="panel-h"><h3>Open tickets (${open.length})</h3></div>${stats}
+    <div class="tree${animTree?' anim':''}" id="tree">
+      <div class="tree-root"><span class="mono muted">${esc(c.code)}</span><b>${esc(c.name)}</b>
+        <div>${pill(healthLabel(c))}</div><span class="muted small">${esc(c.type)} · ${open.length} open issue${open.length>1?'s':''}</span></div>
+      <svg class="tree-lines" id="treeLines" aria-hidden="true"></svg>
+      <div class="tree-kids">${open.map((t,i)=>`<div class="tree-kid" style="--i:${i}">${ticketRow(c,t,st)}</div>`).join('')}</div>
+    </div>
+    ${closed.length?`<details><summary>Closed tickets (${closed.length})</summary><div class="tickets" style="margin-top:8px">${closed.map(t=>ticketRow(c,t,st)).join('')}</div></details>`:''}</div>`
+  :closed.length?`<div class="panel"><details><summary>Closed tickets (${closed.length})</summary><div class="tickets" style="margin-top:8px">${closed.map(t=>ticketRow(c,t,st)).join('')}</div></details></div>`:''}
+  <div class="panel"><h3>Audit history</h3>
+    ${runs.length?`<div>${runs.map((a,i)=>`<div class="iter"><span class="n">#${runs.length-i}</span><span class="mono">${fmtD(a.date)}</span>
+      <div class="body" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${pill(a.result)}<span>${esc(a.auditor)}</span>${a.note?`<span class="muted small">${esc(a.note)}</span>`:''}</div>
+      ${a.checklist?`<div class="chips">${a.checklist.map((v,j)=>`<span class="chip ${v==='No'?'t-bad':v==='Yes'?'t-ok':'t-gray'}" title="${CRITERIA[j]}">${COLS[j]} ${v==='N/A'?'NA':v[0]}</span>`).join('')}</div>`:''}</div>`).join('')}</div>`
+    :'<span class="muted">Not audited yet.</span>'}
+  </div>`;
+}
+
+function ticketRow(c,t,st){
+  const last=t.notes[t.notes.length-1], pv=t.status===PV_RES||t.status===PV_DIS;
+  let note='';
+  if(t.status==='Retest Failed'&&t.rejection)note=`<div class="tk-note bad"><b>Auditor:</b> ${esc(t.rejection)}</div>`;
+  else if(t.status===PV_DIS&&t.justification)note=`<div class="tk-note"><b>Why discontinue:</b> ${esc(t.justification)}</div>`;
+  else if(last&&t.status!==CLOSED)note=`<div class="tk-note"><b>SELM:</b> ${esc(last.text)}</div>`;
+  let side='', below='';
+  if(isSelm()&&t.status==='New')side=`<button class="btn primary sm" data-a="escalate" data-id="${t.id}">Escalate</button>`;
+  else if(isSelm()&&WORKING.includes(t.status))below=`<div class="tk-form">
+      <label class="field"><span>Tentative fix date</span><input type="date" id="fix-${t.id}" value="${t.fixDate?toInput(t.fixDate):''}"></label>
+      <label class="field grow"><span>Note</span><input type="text" id="note-${t.id}" placeholder="Progress, owner, or reason to discontinue"></label>
+      <div class="tk-btns"><button class="btn sm" data-a="saveT" data-id="${t.id}">Save</button><button class="btn okb sm" data-a="resolveT" data-id="${t.id}">Resolved</button><button class="btn danger sm" data-a="discT" data-id="${t.id}">Discontinue</button></div></div>`;
+  else if(isAud()&&st==='verify'&&pv){
+    if(rejecting===t.id)below=`<div class="tk-form"><label class="field grow"><span class="req">Why it is rejected</span><input type="text" id="rej-${t.id}" placeholder="What still fails"></label>
+      <div class="tk-btns"><button class="btn sm" data-a="cancelReject">Cancel</button><button class="btn danger sm" data-a="reject" data-id="${t.id}">Send back to SELM</button></div></div>`;
+    else below=`<div class="tk-approve"><button class="btn approve-big" data-a="approve" data-id="${t.id}"><span>${t.status===PV_DIS?'Approve discontinue':'Approve'}</span></button><button class="btn sm" data-a="startReject" data-id="${t.id}">Reject</button></div>`;
+  }else if(pv&&st!=='verify')side=`<span class="muted small">Waiting for other tickets</span>`;
+  const eta=t.status===CLOSED?`Closed ${fmtD(t.closedAt)} · ${t.closedAs}`:t.fixDate?`ETA ${week(t.fixDate)} · ${fmtD(t.fixDate)}`:'ETA TBD';
+  return `<div class="tk${t.id===flashId?' flash':''}"><div class="tk-main">
+    <div class="tk-top"><span class="mono muted">${t.id}</span><b>${esc(t.category)}</b><span class="st ${tone(t.status)}" title="${esc(t.status)}"><i></i>${esc(shortStatus(t.status))}</span>
+      ${isOverdue(t)?`<span class="late">${daysSince(t.escalatedAt)}d no fix date</span>`:''}<span class="tk-eta">${eta}</span></div>
+    <div class="tk-desc">${esc(t.detail)}</div>${note}</div>
+    ${side?`<div class="tk-side">${side}</div>`:''}${below}</div>`;
+}
+
+function auditForm(c){
+  const d=draft;
+  return `<form class="audit" id="auditForm" novalidate>
+  <div class="audit-h"><h3>Audit #${S.audits.filter(a=>a.courseId===c.id).length+1}</h3><button type="button" class="btn sm" data-a="cancelAudit" data-id="${c.id}">Cancel audit</button></div>
+  <div class="audit-b">
+    <div class="info-fields">
+      <label class="field"><span>Docebo pricing</span><input type="text" id="fPrice" value="${esc(d.price)}"></label>
+      <fieldset class="aud"><legend class="req">Catalog audience</legend><div class="aud-opts">${AUDIENCES.map(a=>`<label class="aud-opt"><input type="checkbox" name="fAud" value="${a}"${d.aud.includes(a)?' checked':''}> ${a}</label>`).join('')}</div></fieldset>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="sec-label">Criteria</span><button type="button" class="btn sm" data-a="markAllYes">All Yes</button></div>
+    <div class="crit">${CRITERIA.map((l,i)=>`<div class="crit-row${d.crit[i]==='No'?' no':''}" id="cr${i}"><span>${l}</span>
+      <div class="seg" role="radiogroup" aria-label="${l}">${['Yes','No','N/A'].map(v=>`<label><input type="radio" name="c${i}" value="${v}"${d.crit[i]===v?' checked':''}><span class="${v==='Yes'?'y':v==='No'?'n':'na'}">${v}</span></label>`).join('')}</div></div>`).join('')}</div>
+    <div id="issues"></div>
+  </div>
+  <div class="audit-f"><span class="err" id="formErr" style="margin-right:auto"></span><button type="submit" class="btn primary">Submit audit</button></div></form>`;
+}
+function renderIssues(){
+  const box=$('#issues');if(!box||!draft)return;
+  const anyNo=draft.crit.includes('No');
+  if(anyNo&&!draft.issues.length)draft.issues=[{desc:'',cat:''}];
+  document.querySelectorAll('.crit-row').forEach((r,i)=>r.classList.toggle('no',draft.crit[i]==='No'));
+  box.className=anyNo?'issues'+(draft.wasOpen?'':' open-in'):'';draft.wasOpen=anyNo;
+  box.innerHTML=anyNo?`<div class="sec-label" style="color:var(--bad)">Issues · each one becomes a ticket</div>`+draft.issues.map((x,i)=>`<div class="issue"><div class="issue-h"><span>Issue ${i+1}</span>${draft.issues.length>1?`<button type="button" class="btn sm" data-a="rmIssue" data-id="${i}">Remove</button>`:''}</div>
+      <label class="field"><span class="req">What is wrong</span><textarea id="iDesc${i}" data-i="${i}" rows="2" placeholder="Page, module or link, and what happens">${esc(x.desc)}</textarea></label>
+      <label class="field"><span class="req">Category</span><select id="iCat${i}" data-i="${i}"><option value="">Choose…</option>${CATS.map(c=>`<option${x.cat===c?' selected':''}>${c}</option>`).join('')}</select></label></div>`).join('')
+      +`<div><button type="button" class="btn sm" data-a="addIssue">+ Add issue</button></div>`:'';
+}
+function submitAudit(){
+  const c=course(draft.courseId), err=m=>{$('#formErr').textContent=m};
+  const left=draft.crit.filter(v=>!v).length;
+  if(left)return err(`Answer all criteria (${left} left).`);
+  if(!draft.aud.length)return err('Choose at least one catalog audience.');
+  c.price=draft.price.trim();c.audience=draft.aud.join(', ');
+  const info={price:c.price,audience:c.audience}, ts=Date.now();
+  const started=c.lockedAt?` · started ${fmtDT(c.lockedAt)}`:'';
+  if(draft.crit.includes('No')){
+    const bad=draft.issues.findIndex(x=>!x.desc.trim()||!x.cat);
+    if(bad>-1)return err(`Issue ${bad+1}: describe it and choose a category.`);
+    const a=addAudit(c,'Failed',[...draft.crit],info,draft.issues.map(x=>({...x})));
+    const made=draft.issues.map(x=>{const t={id:'TKT-'+S.seq.t++,courseId:c.id,auditId:a.id,category:x.cat,detail:x.desc.trim(),status:'New',createdAt:ts,
+      escalatedAt:null,escalatedBy:null,fixDate:null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};S.tickets.push(t);return t});
+    c.health='Unhealthy';c.auditorStatus='In Progress';c.cycleAuditId=a.id;
+    log({courseId:c.id,ticketIds:made.map(t=>t.id),action:'Audit failed',detail:`${made.length} ticket(s) created: ${made.map(t=>`${t.id} ${t.category}`).join(', ')}${started}`});
+    toast(`Unhealthy · created ${made.map(t=>t.id).join(', ')}`);
+  }else{
+    addAudit(c,'Passed',[...draft.crit],info);
+    c.health='Healthy';c.auditorStatus='Completed';c.auditCount++;c.lastAudited=ts;c.lastAuditor=user.name;
+    log({courseId:c.id,action:'Audit passed',detail:`Iteration ${c.auditCount}${started}`});
+    toast(`Healthy · audit counter now ${c.auditCount}`);
+  }
+  c.lockedBy=null;c.lockedAt=null;draft=null;save();render();window.scrollTo(0,0);
+}
+
+/* ---------- dashboard ---------- */
+function vDash(){
+  const cs={};STAGES.forEach(([k])=>cs[k]=0);S.courses.forEach(c=>{cs.all++;cs[stage(c)]++});
+  const open=S.tickets.filter(t=>t.status!==CLOSED), overdue=S.tickets.filter(isOverdue);
+  const catCounts=CATS.map(c=>[c,open.filter(t=>t.category===c).length]).filter(x=>x[1]);
+  const maxC=Math.max(1,...catCounts.map(x=>x[1]));
+  const etaT=S.tickets.filter(t=>WORKING.includes(t.status));
+  const buckets={};etaT.forEach(t=>{const k=week(t.fixDate);(buckets[k]=buckets[k]||[]).push(t)});
+  const bKeys=Object.keys(buckets).sort((a,b)=>a==='TBD'?1:b==='TBD'?-1:Math.min(...buckets[a].map(t=>t.fixDate))-Math.min(...buckets[b].map(t=>t.fixDate)));
+  const maxB=Math.max(1,...bKeys.map(k=>buckets[k].length));
+  const m=(v,l,t,f)=>`<button class="metric" style="--tone:var(${t})" data-a="goFilter" data-id="${f}"><b>${v}</b><span>${l}</span></button>`;
+  const tm=(v,l,t)=>`<div class="metric" style="--tone:var(${t})"><b>${v}</b><span>${l}</span></div>`;
+  const from=rptFrom??dayStart(Date.now()-6*DAY), to=rptTo??dayStart(Date.now());
+  const inR=S.logs.filter(l=>l.ts>=from&&l.ts<to+DAY), cnt=a=>inR.filter(l=>l.action===a).length;
+  return `<div class="head"><h2>Dashboard</h2><div style="display:flex;gap:6px"><button class="btn sm" data-a="loadSample">Load sample data</button><button class="btn sm" data-a="reset">Clear all data</button></div></div>
+  ${overdue.length?`<div class="alert"><span>⚠</span><div><b>${overdue.length} ticket${overdue.length>1?'s':''} escalated over 7 days with no fix date.</b> SELM and Auditor groups notified: ${overdue.map(t=>`<button class="link" data-a="open" data-id="${t.courseId}">${t.id}</button>`).join(', ')}</div></div>`:''}
+  <span class="sec-label">Courses</span>
+  <div class="metrics">${m(cs.all,'All courses','--accent','all')}${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to check','--info','verify')}${m(cs.audit,'To audit','--warn','audit')}${m(cs.disc,'Discontinued','--gray','disc')}</div>
+  <span class="sec-label">Tickets</span>
+  <div class="metrics">${tm(open.length,'Open','--accent')}${tm(S.tickets.filter(t=>t.status==='New'||t.status==='Retest Failed').length,'Waiting for SELM','--warn')}${tm(S.tickets.filter(t=>t.status===PV_RES||t.status===PV_DIS).length,'Waiting for verification','--info')}${tm(overdue.length,'Over 7-day SLA','--bad')}</div>
+  <div class="grid2">
+    <div class="panel"><h3>Open tickets by category</h3><div class="bars">${catCounts.length?catCounts.map(([c,n])=>`<div class="bar"><span>${esc(c)}</span><div class="track"><div class="fill" style="width:${n/maxC*100}%"></div></div><span class="v">${n}</span></div>`).join(''):'<span class="muted">No open tickets</span>'}</div></div>
+    <div class="panel"><h3>Fix ETA by week</h3><div class="bars">${bKeys.length?bKeys.map(k=>`<div class="bar"><span class="mono">${k}</span><div class="track"><div class="fill" style="width:${buckets[k].length/maxB*100}%;${k==='TBD'?'background:var(--warn)':''}"></div></div><span class="v">${buckets[k].length}</span></div>`).join(''):'<span class="muted">Nothing scheduled</span>'}</div></div>
+  </div>
+  <div class="panel"><div class="panel-h"><h3>Status report</h3>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end"><label class="field"><span>From</span><input type="date" id="rFrom" value="${toInput(from)}"></label>
+    <label class="field"><span>To</span><input type="date" id="rTo" value="${toInput(to)}"></label>
+    <button class="btn sm" data-a="rToday">Today</button><button class="btn sm" data-a="rWeek">7 days</button></div></div>
+    <div class="kv"><div><b>${cnt('Audit passed')+cnt('Re-verification approved')}</b><span>Audits passed</span></div><div><b>${cnt('Audit failed')}</b><span>Audits failed</span></div>
+    <div><b>${inR.reduce((n,l)=>n+(l.ticketIds?.length||0),0)}</b><span>Tickets opened</span></div><div><b>${cnt('Escalated')}</b><span>Escalated</span></div>
+    <div><b>${cnt('Ticket closed')}</b><span>Tickets closed</span></div><div><b>${cnt('Retest failed')+cnt('Discontinuation rejected')}</b><span>Sent back</span></div></div></div>`;
+}
+
+/* ---------- history ---------- */
+function vHistory(){
+  const q=histQ.trim().toLowerCase();
+  const rows=S.logs.filter(l=>{const c=course(l.courseId);return !q||[l.actor,l.action,l.detail,l.ticketId,(l.ticketIds||[]).join(' '),c?.code,c?.name].join(' ').toLowerCase().includes(q)}).sort((a,b)=>b.ts-a.ts);
+  return `<div class="head"><h2>History</h2><input type="search" id="histQ" placeholder="Search code, person, ticket…" value="${esc(histQ)}" aria-label="Search history" style="width:min(300px,100%)"></div>
+  <div class="tbl-wrap"><table><thead><tr><th>When</th><th>Who</th><th>Course</th><th>Action</th><th>Detail</th></tr></thead><tbody>
+  ${rows.length?rows.map(l=>{const c=course(l.courseId);return `<tr><td class="mono nowrap">${fmtDT(l.ts)}</td><td class="nowrap">${esc(l.actor)}</td>
+  <td class="mono nowrap">${c?`<button class="link" data-a="open" data-id="${c.id}">${esc(c.code)}</button>`:''}</td>
+  <td class="nowrap">${esc(l.action)}${l.ticketId?` <span class="mono muted">${l.ticketId}</span>`:''}</td><td>${esc(l.detail)}</td></tr>`}).join('')
+  :`<tr><td colspan="5" class="empty">${S.logs.length?'No matches.':'Nothing has happened yet.'}</td></tr>`}</tbody></table></div>`;
+}
+
+/* ---------- modals ---------- */
+function openModal(html){$('#overlay').innerHTML=`<div class="scrim" data-a="closeScrim"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`}
+function closeOv(){$('#overlay').innerHTML=''}
+
+/* ---------- actions ---------- */
+function closeCycle(c){
+  if(openOf(c.id).length)return null;
+  const cyc=ticketsOf(c.id).filter(t=>t.auditId===c.cycleAuditId);
+  if(cyc.some(t=>t.closedAs==='Discontinued')){
+    c.health='Discontinued';c.auditorStatus='Completed';
+    log({courseId:c.id,action:'Course discontinued',detail:'Archived and removed from active queues'});
+    return 'Course discontinued';
+  }
+  c.health='Healthy';c.auditorStatus='Completed';c.auditCount++;c.lastAudited=Date.now();c.lastAuditor=user.name;
+  addAudit(c,'Passed',null,{price:c.price,audience:c.audience},[],'Re-verification after fixes');
+  log({courseId:c.id,action:'Re-verification approved',detail:`Course Healthy · iteration ${c.auditCount}`});
+  return `Course is Healthy · audit counter ${c.auditCount}`;
+}
+function tlog(t,action,detail){log({courseId:t.courseId,ticketId:t.id,action,detail:detail||''})}
+
+const A={
+  go(id){go(id)},
+  open(id){go('course',id)},
+  filter(id){filter=id;rowAnim=true;render()},
+  goFilter(id){filter=id;go('courses')},
+  addCourse(){openModal(`<div class="ov-h"><h3>Add a course</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+    <div class="ov-b"><label class="field"><span class="req">Course code</span><input type="text" id="nCode" placeholder="e.g. ESSTGD04406"></label>
+    <label class="field"><span class="req">Course name</span><input type="text" id="nName"></label>
+    <label class="field"><span>Type</span><select id="nType"><option>E-Learning</option><option>ILT</option><option>On-Demand</option></select></label>
+    <span class="err" id="nErr"></span></div>
+    <div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="saveCourse">Add</button></div>`);$('#nCode').focus()},
+  saveCourse(){
+    const code=$('#nCode').value.trim(),name=$('#nName').value.trim();
+    if(!code||!name){$('#nErr').textContent='Course code and course name are required.';return}
+    if(S.courses.some(c=>c.code.toLowerCase()===code.toLowerCase())){$('#nErr').textContent=`${code} is already in the masterlist.`;return}
+    const c={id:'C'+S.seq.c++,code,name,type:$('#nType').value,price:'',audience:'',health:'Pending Audit',auditorStatus:'Pending',auditCount:0,lastAudited:null,lastAuditor:null,lockedBy:null,lockedAt:null,cycleAuditId:null,createdAt:Date.now()};
+    S.courses.push(c);log({courseId:c.id,action:'Course registered',detail:'Manual entry'});save();closeOv();render();toast(`${code} added`)},
+  close:closeOv,
+  reset(){openModal(`<div class="ov-h"><h3>Clear all data?</h3><button class="x" data-a="close" aria-label="Close">×</button></div><div class="ov-b">All courses, audits, tickets and history in this browser will be removed.</div><div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn danger" data-a="doReset">Clear</button></div>`)},
+  doReset(){fresh();draft=null;closeOv();go('courses');toast('All data cleared')},
+  loadSample(){openModal(`<div class="ov-h"><h3>Load sample data?</h3><button class="x" data-a="close" aria-label="Close">×</button></div><div class="ov-b">Replaces everything in this browser with 10 sample courses.</div><div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="doSample">Load</button></div>`)},
+  doSample(){sample();draft=null;filter='all';closeOv();go('courses');toast('10 sample courses loaded')},
+  startAudit(id){const c=course(id);c.lockedBy=user.name;c.lockedAt=Date.now();c.auditorStatus='In Progress';
+    draft={courseId:id,crit:Array(8).fill(null),price:c.price||'',aud:audList(c.audience),issues:[]};save();render();$('#auditForm')?.scrollIntoView({behavior:'smooth',block:'start'})},
+  cancelAudit(id){const c=course(id);c.lockedBy=null;c.lockedAt=null;c.auditorStatus='Pending';draft=null;save();render()},
+  markAllYes(){draft.crit=draft.crit.map(v=>v||'Yes');document.querySelectorAll('#auditForm input[type=radio]').forEach(r=>r.checked=draft.crit[+r.name.slice(1)]===r.value);renderIssues()},
+  addIssue(){draft.issues.push({desc:'',cat:''});renderIssues();$(`#iDesc${draft.issues.length-1}`)?.focus()},
+  rmIssue(i){draft.issues.splice(+i,1);renderIssues()},
+  reaudit(id){const c=course(id);c.auditorStatus='Pending';log({courseId:c.id,action:'Re-audit queued',detail:''});save();render();toast('Queued for re-audit')},
+  escalate(id){const t=ticket(id);t.status='Escalated';t.escalatedAt=Date.now();t.escalatedBy=user.name;tlog(t,'Escalated');flashId=id;save();render();toast(`${id} escalated · set a fix date within 7 days`)},
+  saveT(id,quiet){const t=ticket(id),fix=fromInput($(`#fix-${id}`).value),note=$(`#note-${id}`).value.trim();
+    if(fix!==t.fixDate){tlog(t,t.fixDate?'Fix date changed':'Fix date set',`${week(t.fixDate)} → ${week(fix)}${fix?` (${fmtD(fix)})`:''}`);t.fixDate=fix}
+    if(note){t.notes.push({ts:Date.now(),by:user.name,text:note});tlog(t,'Note added',note)}
+    if(t.fixDate&&t.status!=='In Progress'){t.status='In Progress';tlog(t,'Status → In Progress','Fix date saved')}
+    if(!quiet){flashId=id;save();render();toast('Saved')}},
+  resolveT(id){A.saveT(id,true);const t=ticket(id);t.status=PV_RES;tlog(t,'Marked resolved','Sent for auditor verification');flashId=id;save();render();toast(`${id} sent for verification`)},
+  discT(id){const note=$(`#note-${id}`).value.trim();if(!note){$(`#note-${id}`).focus();toast('Add a note explaining why');return}
+    const t=ticket(id);t.notes.push({ts:Date.now(),by:user.name,text:note});t.status=PV_DIS;t.justification=note;tlog(t,'Proposed discontinuation',note);flashId=id;save();render();toast(`${id} sent for verification`)},
+  startReject(id){rejecting=id;render();$('#rej-'+id)?.focus()},
+  cancelReject(){rejecting=null;render()},
+  approve(id){const b=document.querySelector(`.approve-big[data-id="${id}"]`);
+    if(!b||matchMedia('(prefers-reduced-motion: reduce)').matches)return A.doApprove(id);
+    if(b.classList.contains('filling'))return;
+    b.classList.add('filling');b.disabled=true;
+    setTimeout(()=>{b.querySelector('span').textContent='✓ Approved';b.classList.add('done')},650);
+    setTimeout(()=>A.doApprove(id),1150)},
+  doApprove(id){const t=ticket(id),c=course(t.courseId);
+    t.closedAs=t.status===PV_DIS?'Discontinued':'Resolved';t.status=CLOSED;t.closedAt=Date.now();tlog(t,'Ticket closed',`Approved (${t.closedAs})`);
+    const r=closeCycle(c);save();render();toast(`${id} closed`+(r?` · ${r}`:''))},
+  reject(id){const t=ticket(id),n=$(`#rej-${id}`).value.trim();if(!n){$(`#rej-${id}`).focus();toast('Add rejection notes first');return}
+    const dis=t.status===PV_DIS;rejecting=null;t.status='Retest Failed';t.rejection=n;tlog(t,dis?'Discontinuation rejected':'Retest failed',n);flashId=id;save();render();toast(`${id} sent back to SELM`)},
+  rToday(){rptFrom=rptTo=dayStart(Date.now());render()},
+  rWeek(){rptFrom=dayStart(Date.now()-6*DAY);rptTo=dayStart(Date.now());render()},
+};
+
+document.addEventListener('click',e=>{
+  const el=e.target.closest('[data-a]');if(!el)return;
+  const a=el.dataset.a;
+  if(a==='closeScrim'){if(e.target===el)closeOv();return}
+  if(A[a]){e.preventDefault();A[a](el.dataset.id)}
+});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&$('#overlay').innerHTML)closeOv();
+  if(e.key==='Enter'&&e.target.matches('tr.click'))A.open(e.target.dataset.id);
+});
+document.addEventListener('change',e=>{
+  const t=e.target;
+  if(t.name&&/^c\d$/.test(t.name)){draft.crit[+t.name.slice(1)]=t.value;renderIssues()}
+  else if(t.name==='fAud')draft.aud=[...document.querySelectorAll('input[name=fAud]:checked')].map(x=>x.value);
+  else if(t.id==='userSel'){user=USERS.find(u=>u.id===t.value);closeOv();render();toast(`Now ${user.name} (${user.role})`)}
+  else if(t.id==='catFilter'){catFilter=t.value;rowAnim=true;render()}
+  else if(t.id==='rFrom'){rptFrom=fromInput(t.value);render()}
+  else if(t.id==='rTo'){rptTo=fromInput(t.value);render()}
+  else if(t.id?.startsWith('iCat'))draft.issues[+t.dataset.i].cat=t.value;
+});
+document.addEventListener('input',e=>{
+  const t=e.target;
+  if(t.id?.startsWith('iDesc'))draft.issues[+t.dataset.i].desc=t.value;
+  else if(t.id==='fPrice')draft.price=t.value;
+  else if(t.id==='search'||t.id==='histQ'){if(t.id==='search')search=t.value;else histQ=t.value;
+    const id=t.id,pos=t.selectionStart;render();const n=$('#'+id);n.focus();n.setSelectionRange(pos,pos)}
+});
+document.addEventListener('submit',e=>{if(e.target.id==='auditForm'){e.preventDefault();submitAudit()}});
+
+/* ---------- boot ---------- */
+S=load(); if(!S||!S.seq)sample();
+// an unfinished audit form does not survive a reload, so release its lock
+S.courses.forEach(c=>{if(c.lockedBy){c.lockedBy=null;c.lockedAt=null;if(!openOf(c.id).length)c.auditorStatus='Pending'}});
+$('#userSel').innerHTML=USERS.map(u=>`<option value="${u.id}">${u.name} · ${u.role}</option>`).join('');
+render();
+})();
