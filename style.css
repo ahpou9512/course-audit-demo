@@ -6,7 +6,7 @@ img{max-width:100%}
 
 /* Layout: course-centric — one course list with stage filters; each course opens its own page holding audit, tickets, verification and history */
 :root{
-  --bg:#F3F6F8; --surface:#FFFFFF; --surface-2:#EAF0F4; --fg:#16212B; --muted:#586775; --line:#D6DEE5;
+  --bg:#FFFFFF; --surface:#FFFFFF; --surface-2:#EAF0F4; --fg:#16212B; --muted:#586775; --line:#D6DEE5;
   --accent:#1C5A8C; --accent-fg:#FFFFFF; --accent-soft:#E0ECF6;
   --ok:#1C7448; --ok-bg:#E2F2E9; --bad:#AE2A21; --bad-bg:#FAE5E3; --warn:#8E5600; --warn-bg:#FCEFD6;
   --gray:#5F6B77; --gray-bg:#E9EDF1; --info:#3A4DB0; --info-bg:#E6E9FA;
@@ -15,7 +15,7 @@ img{max-width:100%}
   --f-body:"Public Sans","Segoe UI",system-ui,sans-serif;
   --f-mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
 }
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+@media not all{:root:not([data-theme="light"]){
   --bg:#0E141A; --surface:#161F28; --surface-2:#1D2832; --fg:#E4EBF1; --muted:#97A6B4; --line:#2A3743;
   --accent:#74AEE0; --accent-fg:#0A1622; --accent-soft:#1B3044;
   --ok:#72CF9B; --ok-bg:#15362A; --bad:#F09E96; --bad-bg:#42201D; --warn:#F0C26A; --warn-bg:#382B12;

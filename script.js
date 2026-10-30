@@ -99,25 +99,28 @@ function go(name,id){view={name,id};enterAnim=true;rowAnim=true;render();window.
 function vCourses(){
   const counts={};STAGES.forEach(([k])=>counts[k]=0);
   S.courses.forEach(c=>{counts.all++;counts[stage(c)]++});
-  const q=search.trim().toLowerCase();
-  const list=S.courses.filter(c=>(filter==='all'||stage(c)===filter)&&(!q||(c.code+' '+c.name).toLowerCase().includes(q))
-      &&(!catFilter||openOf(c.id).some(t=>t.category===catFilter)))
-    .sort((a,b)=>(nextStep(b)[1]-nextStep(a)[1])||b.createdAt-a.createdAt);
   const canAdd=isAud()||isOwner();
   return `<div class="head"><h2>Courses</h2>${canAdd?`<button class="btn primary" data-a="addCourse">+ Add course</button>`:''}</div>
   <div class="toolbar"><div class="chips-bar">${STAGES.map(([k,l])=>`<button class="fchip" data-a="filter" data-id="${k}" aria-pressed="${filter===k}">${l} <b>${counts[k]}</b></button>`).join('')}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap"><select id="catFilter" aria-label="Filter by issue category"><option value="">All categories</option>${CATS.map(x=>`<option${catFilter===x?' selected':''}>${x}</option>`).join('')}</select>
     <input type="search" id="search" placeholder="Search code or name" value="${esc(search)}" aria-label="Search courses"></div></div>
-  <div class="tbl-wrap"><table><thead><tr><th>Course</th><th>Status</th><th>Issue categories</th><th>Last audited</th><th>Next step</th></tr></thead><tbody>
-  ${list.length?list.map((c,i)=>{const [txt,me]=nextStep(c);const o=openOf(c.id);return `<tr class="click${rowAnim?' row-in':''}" style="--i:${Math.min(i,12)}" data-a="open" data-id="${c.id}" tabindex="0">
+  <div class="tbl-wrap"><table><thead><tr><th>Course</th><th>Status</th><th>Issue categories</th><th>Last audited</th><th>Next step</th></tr></thead><tbody id="courseRows">${courseRows()}
+  </tbody></table></div>`;
+}
+
+function courseRows(){
+  const q=search.trim().toLowerCase();
+  const list=S.courses.filter(c=>(filter==='all'||stage(c)===filter)&&(!q||(c.code+' '+c.name).toLowerCase().includes(q))
+      &&(!catFilter||openOf(c.id).some(t=>t.category===catFilter)))
+    .sort((a,b)=>(nextStep(b)[1]-nextStep(a)[1])||b.createdAt-a.createdAt);
+  return `  ${list.length?list.map((c,i)=>{const [txt,me]=nextStep(c);const o=openOf(c.id);return `<tr class="click${rowAnim?' row-in':''}" style="--i:${Math.min(i,12)}" data-a="open" data-id="${c.id}" tabindex="0">
     <td><div class="cname"><span class="mono">${esc(c.code)}</span><b>${esc(c.name)}</b></div></td>
     <td>${pill(healthLabel(c))}</td>
     <td>${o.length?`<div class="catlist">${o.map(t=>`<div class="ci" title="${t.id}"><span class="dot ${tone(t.status)}"></span><span class="cn">${esc(t.category)}</span>
       <span class="cs${isOverdue(t)?' late':''}">${esc(shortStatus(t.status))}${isOverdue(t)?` · ${daysSince(t.escalatedAt)}d no fix date`:''}</span></div>`).join('')}</div>`:'<span class="muted">—</span>'}</td>
     <td class="mono nowrap">${fmtD(c.lastAudited)}</td>
     <td><span class="next${me?' me':''}">${esc(txt)}</span></td></tr>`}).join('')
-  :`<tr><td colspan="5" class="empty">${S.courses.length?'No courses match.':'No courses yet. Add the first one with “+ Add course”.'}</td></tr>`}
-  </tbody></table></div>`;
+  :`<tr><td colspan="5" class="empty">${S.courses.length?'No courses match.':'No courses yet. Add the first one with “+ Add course”.'}</td></tr>`}`;
 }
 
 /* ---------- course page ---------- */
@@ -267,15 +270,17 @@ function vDash(){
 }
 
 /* ---------- history ---------- */
-function vHistory(){
+function histRows(){
   const q=histQ.trim().toLowerCase();
   const rows=S.logs.filter(l=>{const c=course(l.courseId);return !q||[l.actor,l.action,l.detail,l.ticketId,(l.ticketIds||[]).join(' '),c?.code,c?.name].join(' ').toLowerCase().includes(q)}).sort((a,b)=>b.ts-a.ts);
-  return `<div class="head"><h2>History</h2><input type="search" id="histQ" placeholder="Search code, person, ticket…" value="${esc(histQ)}" aria-label="Search history" style="width:min(300px,100%)"></div>
-  <div class="tbl-wrap"><table><thead><tr><th>When</th><th>Who</th><th>Course</th><th>Action</th><th>Detail</th></tr></thead><tbody>
-  ${rows.length?rows.map(l=>{const c=course(l.courseId);return `<tr><td class="mono nowrap">${fmtDT(l.ts)}</td><td class="nowrap">${esc(l.actor)}</td>
+  return `  ${rows.length?rows.map(l=>{const c=course(l.courseId);return `<tr><td class="mono nowrap">${fmtDT(l.ts)}</td><td class="nowrap">${esc(l.actor)}</td>
   <td class="mono nowrap">${c?`<button class="link" data-a="open" data-id="${c.id}">${esc(c.code)}</button>`:''}</td>
   <td class="nowrap">${esc(l.action)}${l.ticketId?` <span class="mono muted">${l.ticketId}</span>`:''}</td><td>${esc(l.detail)}</td></tr>`}).join('')
-  :`<tr><td colspan="5" class="empty">${S.logs.length?'No matches.':'Nothing has happened yet.'}</td></tr>`}</tbody></table></div>`;
+  :`<tr><td colspan="5" class="empty">${S.logs.length?'No matches.':'Nothing has happened yet.'}</td></tr>`}`;
+}
+function vHistory(){
+  return `<div class="head"><h2>History</h2><input type="search" id="histQ" placeholder="Search code, person, ticket…" value="${esc(histQ)}" aria-label="Search history" style="width:min(300px,100%)"></div>
+  <div class="tbl-wrap"><table><thead><tr><th>When</th><th>Who</th><th>Course</th><th>Action</th><th>Detail</th></tr></thead><tbody id="histRows">${histRows()}</tbody></table></div>`;
 }
 
 /* ---------- modals ---------- */
@@ -296,6 +301,12 @@ function closeCycle(c){
   log({courseId:c.id,action:'Re-verification approved',detail:`Course Healthy · iteration ${c.auditCount}`});
   return `Course is Healthy · audit counter ${c.auditCount}`;
 }
+function log(e){S.logs.push({id:'L'+S.seq.l++,ts:Date.now(),actor:user.name,detail:'',...e})}
+function addAudit(c,result,checklist,info,issues,note){
+  const a={id:'A'+S.seq.a++,courseId:c.id,date:Date.now(),result,auditor:user.name,checklist,...info,issues:issues||[],note:note||''};
+  S.audits.push(a);return a}
+function toast(msg){const h=$('#toastHost'),el=document.createElement('div');el.className='toast';el.setAttribute('role','status');el.textContent=msg;
+  h.innerHTML='';h.appendChild(el);setTimeout(()=>{el.classList.add('out');setTimeout(()=>el.remove(),300)},2400)}
 function tlog(t,action,detail){log({courseId:t.courseId,ticketId:t.id,action,detail:detail||''})}
 
 const A={
@@ -375,8 +386,9 @@ document.addEventListener('input',e=>{
   const t=e.target;
   if(t.id?.startsWith('iDesc'))draft.issues[+t.dataset.i].desc=t.value;
   else if(t.id==='fPrice')draft.price=t.value;
-  else if(t.id==='search'||t.id==='histQ'){if(t.id==='search')search=t.value;else histQ=t.value;
-    const id=t.id,pos=t.selectionStart;render();const n=$('#'+id);n.focus();n.setSelectionRange(pos,pos)}
+  // only refresh the table body so the search box keeps focus, scroll and IME composition
+  else if(t.id==='search'){search=t.value;$('#courseRows').innerHTML=courseRows()}
+  else if(t.id==='histQ'){histQ=t.value;$('#histRows').innerHTML=histRows()}
 });
 document.addEventListener('submit',e=>{if(e.target.id==='auditForm'){e.preventDefault();submitAudit()}});
 
