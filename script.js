@@ -314,12 +314,12 @@ const A={
   open(id){go('course',id)},
   filter(id){filter=id;rowAnim=true;render()},
   goFilter(id){filter=id;go('courses')},
-  addCourse(){openModal(`<div class="ov-h"><h3>Add a course</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+  addCourse(){openModal(`<form id="addForm" novalidate style="display:contents"><div class="ov-h"><h3>Add a course</h3><button type="button" class="x" data-a="close" aria-label="Close">×</button></div>
     <div class="ov-b"><label class="field"><span class="req">Course code</span><input type="text" id="nCode" placeholder="e.g. ESSTGD04406"></label>
     <label class="field"><span class="req">Course name</span><input type="text" id="nName"></label>
     <label class="field"><span>Type</span><select id="nType"><option>E-Learning</option><option>ILT</option><option>On-Demand</option></select></label>
     <span class="err" id="nErr"></span></div>
-    <div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="saveCourse">Add</button></div>`);$('#nCode').focus()},
+    <div class="ov-f"><button type="button" class="btn" data-a="close">Cancel</button><button type="submit" class="btn primary">Add</button></div></form>`);$('#nCode').focus()},
   saveCourse(){
     const code=$('#nCode').value.trim(),name=$('#nName').value.trim();
     if(!code||!name){$('#nErr').textContent='Course code and course name are required.';return}
@@ -390,7 +390,10 @@ document.addEventListener('input',e=>{
   else if(t.id==='search'){search=t.value;$('#courseRows').innerHTML=courseRows()}
   else if(t.id==='histQ'){histQ=t.value;$('#histRows').innerHTML=histRows()}
 });
-document.addEventListener('submit',e=>{if(e.target.id==='auditForm'){e.preventDefault();submitAudit()}});
+document.addEventListener('submit',e=>{
+  if(e.target.id==='auditForm'){e.preventDefault();submitAudit()}
+  else if(e.target.id==='addForm'){e.preventDefault();A.saveCourse()}
+});
 
 /* ---------- boot ---------- */
 S=load(); if(!S||!S.seq)fresh();
