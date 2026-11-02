@@ -140,6 +140,10 @@ button.metric:hover{border-color:var(--muted);border-top-color:var(--tone)}
 .fold-btn:hover{color:var(--fg);background:var(--soft,rgba(0,0,0,.04))}
 .fold-btn i{font-style:normal;transition:transform .2s;transform:rotate(180deg)}
 .fold-btn[aria-expanded=false] i{transform:none}
+.fold-btn .fl{display:grid;justify-items:end}
+.fold-btn .fl>span{grid-area:1/1}
+.fold-btn[aria-expanded=true] .fl>span:last-child,.fold-btn[aria-expanded=false] .fl>span:first-child{visibility:hidden}
+html{overflow-y:scroll}
 .fold-box{display:grid;grid-template-rows:1fr;transition:grid-template-rows .25s ease,opacity .2s,margin .25s}
 .fold-box>*{min-height:0;overflow:hidden;padding-top:3px;margin-top:-3px}
 .fold-box.shut{grid-template-rows:0fr;opacity:0;margin-top:calc(-1 * 16px)}

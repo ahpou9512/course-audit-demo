@@ -202,7 +202,7 @@ const audView=c=>`Audience <b>${esc(c.audience||'—')}</b>${canPrice()?` <butto
 // dashboard breakdown cards can be folded away; the choice is remembered per browser
 const FOLD_KEY='course-audit-fold';
 let fold=(()=>{try{return JSON.parse(localStorage.getItem(FOLD_KEY))||{}}catch(e){return {}}})();
-const foldBtn=k=>`<button class="fold-btn" data-a="fold" data-id="${k}" aria-expanded="${!fold[k]}">${fold[k]?'Show details':'Hide details'}<i>▾</i></button>`;
+const foldBtn=k=>`<button class="fold-btn" data-a="fold" data-id="${k}" aria-expanded="${!fold[k]}"><span class="fl"><span>Hide details</span><span>Show details</span></span><i>▾</i></button>`;
 const critChips=a=>`<div class="chips">${a.checklist.map((v,j)=>`<span class="chip ${v==='No'?'t-bad':v==='Yes'?'t-ok':'t-gray'}" title="${CRITERIA[j]}">${COLS[j]} ${v==='N/A'?'NA':v[0]}</span>`).join('')}</div>`;
 // the auditor can correct the criteria of the current audit while its tickets are still open
 function critEditor(a){
@@ -494,7 +494,7 @@ const A={
     if(v!==old){c.audience=v;log({courseId:id,action:'Audience updated',detail:`${old||'—'} → ${v}`});save();toast('Audience updated')}
     A.cancelAud(id)},
   fold(k){fold[k]=!fold[k];try{localStorage.setItem(FOLD_KEY,JSON.stringify(fold))}catch(e){}
-    $('#fold-'+k).classList.toggle('shut',!!fold[k]);$(`.fold-btn[data-id=${k}]`).outerHTML=foldBtn(k)},
+    $('#fold-'+k).classList.toggle('shut',!!fold[k]);$(`.fold-btn[data-id=${k}]`).setAttribute('aria-expanded',!fold[k])},
   rToday(){rptFrom=rptTo=dayStart(Date.now());render()},
   rWeek(){rptFrom=dayStart(Date.now()-6*DAY);rptTo=dayStart(Date.now());render()},
 };
