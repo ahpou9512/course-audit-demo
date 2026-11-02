@@ -3,6 +3,7 @@ const DAY=864e5, KEY='course-audit-demo-v4';
 const CRITERIA=['Search on Dell Learning works','Course Description (PDF) works','Enrollment works','Launch URL works',
   'Course launches on first attempt','No error page','No access denied','Completion recorded'];
 const COLS='HIJKLMNO';
+const answers=i=>i<3?['Yes','No','N/A']:['Yes','No']; // only H–J can be N/A
 const AUDIENCES=['Partner','DSP','Customer','Tailored','TD'];
 const CATS=['Content','Edutube','Course Setup','Learning Plan Setup','Pricing','CD PDF','IT issue','Other'];
 const USERS=[
@@ -50,7 +51,8 @@ function nextStep(c){
     if(c.lockedBy)return ['Finish your audit',true];
     return isAud()?['Start audit',true]:['Waiting for auditor',false];
   }
-  if(st==='issues'){const n=o.filter(t=>t.status==='New'||WORKING.includes(t.status)).length;
+  if(st==='issues'){const n=o.filter(t=>t.status==='New'||WORKING.includes(t.status)).length, v=o.length-n;
+    if(isAud()&&v)return [`${v} ticket${v>1?'s':''} to verify`,true];
     return isSelm()?[`${n} ticket${n>1?'s':''} to handle`,true]:['With SELM',false]}
   if(st==='verify')return isAud()?['Verify fixes',true]:['Waiting for auditor',false];
   if(st==='healthy')return [`Audited ${daysSince(c.lastAudited)}d ago`,false];
@@ -171,12 +173,20 @@ function vCourse(){
   :closed.length?`<div class="panel"><details><summary>Closed tickets (${closed.length})</summary><div class="tickets" style="margin-top:8px">${closed.map(t=>ticketRow(c,t,st)).join('')}</div></details></div>`:''}
   <div class="panel"><h3>Audit history</h3>
     ${runs.length?`<div>${runs.map((a,i)=>`<div class="iter"><span class="n">#${runs.length-i}</span><span class="mono">${fmtD(a.date)}</span>
-      <div class="body" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${pill(a.result)}<span>${esc(a.auditor)}</span>${a.note?`<span class="muted small">${esc(a.note)}</span>`:''}</div>
-      ${a.checklist?`<div class="chips">${a.checklist.map((v,j)=>`<span class="chip ${v==='No'?'t-bad':v==='Yes'?'t-ok':'t-gray'}" title="${CRITERIA[j]}">${COLS[j]} ${v==='N/A'?'NA':v[0]}</span>`).join('')}</div>`:''}</div>`).join('')}</div>`
+      <div class="body" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${pill(a.result)}<span>${esc(a.auditor)}</span>${a.note?`<span class="muted small">${esc(a.note)}</span>`:''}
+        ${a.checklist&&isAud()&&a.id===c.cycleAuditId&&open.length?`<button class="link small" data-a="editCrit" data-id="${a.id}">Edit criteria</button>`:''}</div>
+      ${a.checklist?`<div class="ck" id="ck-${a.id}">${critChips(a)}</div>`:''}</div>`).join('')}</div>`
     :'<span class="muted">Not audited yet.</span>'}
   </div>`;
 }
 
+const critChips=a=>`<div class="chips">${a.checklist.map((v,j)=>`<span class="chip ${v==='No'?'t-bad':v==='Yes'?'t-ok':'t-gray'}" title="${CRITERIA[j]}">${COLS[j]} ${v==='N/A'?'NA':v[0]}</span>`).join('')}</div>`;
+// the auditor can correct the criteria of the current audit while its tickets are still open
+function critEditor(a){
+  return `<div class="crit-edit"><div class="crit">${CRITERIA.map((l,i)=>`<div class="crit-row${a.checklist[i]==='No'?' no':''}"><span>${l}</span>
+    <div class="seg" role="radiogroup" aria-label="${l}">${answers(i).map(v=>`<label><input type="radio" name="e${i}" value="${v}"${a.checklist[i]===v?' checked':''}><span class="${v==='Yes'?'y':v==='No'?'n':'na'}">${v}</span></label>`).join('')}</div></div>`).join('')}</div>
+    <div class="tk-btns"><span class="err" id="ckErr-${a.id}" style="margin-right:auto"></span><button class="btn sm" data-a="cancelCrit" data-id="${a.id}">Cancel</button><button class="btn primary sm" data-a="saveCrit" data-id="${a.id}">Save criteria</button></div></div>`;
+}
 function ticketRow(c,t,st){
   const pv=t.status===PV_RES||t.status===PV_DIS;
   let note='';
@@ -188,11 +198,11 @@ function ticketRow(c,t,st){
       <label class="field"><span>Tentative fix date</span><input type="date" id="fix-${t.id}" value="${t.fixDate?toInput(t.fixDate):''}"></label>
       <label class="field grow"><span>Note</span><input type="text" id="note-${t.id}" placeholder="Progress, owner, or reason to discontinue"></label>
       <div class="tk-btns"><button class="btn sm" data-a="saveT" data-id="${t.id}">Save</button><button class="btn okb sm" data-a="resolveT" data-id="${t.id}">Resolved</button><button class="btn danger sm" data-a="discT" data-id="${t.id}">Discontinue</button></div></div>`;
-  else if(isAud()&&st==='verify'&&pv){
+  else if(isAud()&&pv){
     if(rejecting===t.id)below=`<div class="tk-form"><label class="field grow"><span class="req">Why it is rejected</span><input type="text" id="rej-${t.id}" placeholder="What still fails"></label>
       <div class="tk-btns"><button class="btn sm" data-a="cancelReject">Cancel</button><button class="btn danger sm" data-a="reject" data-id="${t.id}">Send back to SELM</button></div></div>`;
     else below=`<div class="tk-approve"><button class="btn approve-big" data-a="approve" data-id="${t.id}"><span>${t.status===PV_DIS?'Approve discontinue':'Approve'}</span></button><button class="btn sm" data-a="startReject" data-id="${t.id}">Reject</button></div>`;
-  }else if(pv&&st!=='verify')side=`<span class="muted small">Waiting for other tickets</span>`;
+  }else if(pv)side=`<span class="muted small">Waiting for auditor</span>`;
   const eta=t.status===CLOSED?`Closed ${fmtD(t.closedAt)} · ${t.closedAs}`:t.fixDate?`ETA ${week(t.fixDate)} · ${fmtD(t.fixDate)}`:'ETA TBD';
   return `<div class="tk${t.id===flashId?' flash':''}"><div class="tk-main">
     <div class="tk-top"><span class="mono muted">${t.id}</span><b>${esc(t.category)}</b><span class="st ${tone(t.status)}" title="${esc(t.status)}"><i></i>${esc(shortStatus(t.status))}</span>
@@ -205,10 +215,11 @@ function ticketRow(c,t,st){
 function records(t){
   const recs=S.logs.filter(l=>l.ticketId===t.id).reverse(); // logs are stored oldest first
   recs.push({ts:t.createdAt,actor:'',action:'Ticket created',detail:''});
-  const row=l=>`<li><span class="mono">${fmtDT(l.ts)}</span><b>${esc(l.action)}</b>${l.detail?`<span>${esc(l.detail)}</span>`:''}${l.actor?`<i>${esc(l.actor)}</i>`:''}</li>`;
-  const more=recs.slice(3);
-  return `<div class="recs"><div class="recs-h">Records</div><ol>${recs.slice(0,3).map(row).join('')}</ol>
-    ${more.length?`<details data-tid="${t.id}"${openRecs.has(t.id)?' open':''}><summary>Show ${more.length} earlier</summary><ol>${more.map(row).join('')}</ol></details>`:''}</div>`;
+  const row=(l,i)=>`<li${i>=3?' class="old"':''}><span class="mono">${fmtDT(l.ts)}</span><b>${esc(l.action)}</b>${l.detail?`<span>${esc(l.detail)}</span>`:''}${l.actor?`<i>${esc(l.actor)}</i>`:''}</li>`;
+  const more=recs.length-3, open=openRecs.has(t.id);
+  // one list: older rows unfold under the first 3, and the toggle stays at the bottom
+  return `<div class="recs${open?' open':''}"><div class="recs-h">Records</div><ol>${recs.map(row).join('')}</ol>
+    ${more>0?`<button type="button" class="link small recs-more" data-a="toggleRecs" data-id="${t.id}" data-n="${more}">${open?'Show less':`Show ${more} earlier`}</button>`:''}</div>`;
 }
 function auditForm(c){
   const d=draft;
@@ -221,7 +232,7 @@ function auditForm(c){
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="sec-label">Criteria</span><button type="button" class="btn sm" data-a="markAllYes">All Yes</button></div>
     <div class="crit">${CRITERIA.map((l,i)=>`<div class="crit-row${d.crit[i]==='No'?' no':''}" id="cr${i}"><span>${l}</span>
-      <div class="seg" role="radiogroup" aria-label="${l}">${['Yes','No','N/A'].map(v=>`<label><input type="radio" name="c${i}" value="${v}"${d.crit[i]===v?' checked':''}><span class="${v==='Yes'?'y':v==='No'?'n':'na'}">${v}</span></label>`).join('')}</div></div>`).join('')}</div>
+      <div class="seg" role="radiogroup" aria-label="${l}">${answers(i).map(v=>`<label><input type="radio" name="c${i}" value="${v}"${d.crit[i]===v?' checked':''}><span class="${v==='Yes'?'y':v==='No'?'n':'na'}">${v}</span></label>`).join('')}</div></div>`).join('')}</div>
     <div id="issues"></div>
   </div>
   <div class="audit-f"><span class="err" id="formErr" style="margin-right:auto"></span><button type="submit" class="btn primary submit-fill" id="submitBtn"><span>Submit audit</span></button></div></form>`;
@@ -272,6 +283,15 @@ function submitAudit(){
 }
 
 /* ---------- dashboard ---------- */
+// how often each criterion was marked No, laid out like the category panel
+function critPanel(){
+  const runs=S.audits.filter(a=>a.checklist?.length);
+  const rows=CRITERIA.map((l,i)=>[l,runs.filter(a=>a.checklist[i]==='No').length]).filter(r=>r[1]).sort((a,b)=>b[1]-a[1]);
+  const max=Math.max(1,...rows.map(r=>r[1]));
+  return `<div class="panel"><div class="panel-h"><h3>Criteria marked No</h3><span class="muted small">${runs.length} audit${runs.length===1?'':'s'} · all time</span></div>
+    <div class="bars wide">${rows.length?rows.map(([l,n])=>`<div class="bar"><span>${esc(l)}</span><div class="track"><div class="fill" style="width:${n/max*100}%;background:var(--bad)"></div></div><span class="v">${n}</span></div>`).join('')
+    :`<span class="muted">${runs.length?'No criteria marked No':'No audits yet'}</span>`}</div></div>`;
+}
 function vDash(){
   const cs={};STAGES.forEach(([k])=>cs[k]=0);S.courses.forEach(c=>{cs.all++;cs[stage(c)]++});
   const open=S.tickets.filter(t=>t.status!==CLOSED), overdue=S.tickets.filter(isOverdue);
@@ -291,11 +311,13 @@ function vDash(){
   <div class="metrics">${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to check','--info','verify')}${m(cs.audit,'To audit','--warn','audit')}${m(cs.disc,'Discontinued','--gray','disc')}</div>
   ${overdue.length?`<div class="alert"><span>⚠</span><div><b>${overdue.length} ticket${overdue.length>1?'s':''} escalated over 7 days with no fix date.</b> SELM and Auditor groups notified: ${overdue.map(t=>`<button class="link" data-a="open" data-id="${t.courseId}">${t.id}</button>`).join(', ')}</div></div>`:''}
   <span class="sec-label">Tickets</span>
-  <div class="metrics">${tm(open.length,'Open','--accent')}${tm(S.tickets.filter(t=>t.status==='New'||t.status==='Retest Failed').length,'Waiting for SELM','--warn')}${tm(S.tickets.filter(t=>t.status===PV_RES||t.status===PV_DIS).length,'Waiting for verification','--info')}${tm(overdue.length,'Over 7-day SLA','--bad')}</div>
+  <div class="metric hero" style="--tone:var(--accent)"><b>${open.length}</b><span>Open tickets</span></div>
+  <div class="metrics">${tm(S.tickets.filter(t=>t.status==='New'||t.status==='Retest Failed').length,'Waiting for SELM','--warn')}${tm(S.tickets.filter(t=>t.status==='Escalated'||t.status==='In Progress').length,'Escalated','--gray')}${tm(S.tickets.filter(t=>t.status===PV_RES||t.status===PV_DIS).length,'Waiting for verification','--info')}${tm(overdue.length,'Over 7-day SLA','--bad')}</div>
   <div class="grid2">
     <div class="panel"><h3>Open tickets by category</h3><div class="bars">${catCounts.length?catCounts.map(([c,n])=>`<div class="bar"><span>${esc(c)}</span><div class="track"><div class="fill" style="width:${n/maxC*100}%"></div></div><span class="v">${n}</span></div>`).join(''):'<span class="muted">No open tickets</span>'}</div></div>
     <div class="panel"><h3>Fix ETA by week</h3><div class="bars">${bKeys.length?bKeys.map(k=>`<div class="bar"><span class="mono">${k}</span><div class="track"><div class="fill" style="width:${buckets[k].length/maxB*100}%;${k==='TBD'?'background:var(--warn)':''}"></div></div><span class="v">${buckets[k].length}</span></div>`).join(''):'<span class="muted">Nothing scheduled</span>'}</div></div>
   </div>
+  ${critPanel()}
   <div class="panel"><div class="panel-h"><h3>Status report</h3>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end"><label class="field"><span>From</span><input type="date" id="rFrom" value="${toInput(from)}"></label>
     <label class="field"><span>To</span><input type="date" id="rTo" value="${toInput(to)}"></label>
@@ -407,6 +429,19 @@ const A={
     const r=closeCycle(c);save();render();toast(`${id} closed`+(r?` · ${r}`:''))},
   reject(id){const t=ticket(id),n=$(`#rej-${id}`).value.trim();if(!n){$(`#rej-${id}`).focus();toast('Add rejection notes first');return}
     const dis=t.status===PV_DIS;rejecting=null;t.status='Retest Failed';t.rejection=n;tlog(t,dis?'Discontinuation rejected':'Retest failed',n);flashId=id;save();render();toast(`${id} sent back to SELM`)},
+  editCrit(id){const a=S.audits.find(x=>x.id===id),box=$('#ck-'+id);if(!a||!box)return;
+    document.querySelector(`[data-a=editCrit][data-id="${id}"]`)?.setAttribute('hidden','');box.innerHTML=critEditor(a)},
+  cancelCrit(id){const a=S.audits.find(x=>x.id===id);$('#ck-'+id).innerHTML=critChips(a);
+    document.querySelector(`[data-a=editCrit][data-id="${id}"]`)?.removeAttribute('hidden')},
+  saveCrit(id){const a=S.audits.find(x=>x.id===id);
+    const next=CRITERIA.map((_,i)=>document.querySelector(`#ck-${id} input[name=e${i}]:checked`)?.value||a.checklist[i]);
+    // open tickets mean the course still has a failing criterion
+    if(!next.includes('No')&&openOf(a.courseId).length){$('#ckErr-'+id).textContent='Keep at least one No while tickets are open.';return}
+    const diff=next.map((v,i)=>v!==a.checklist[i]?`${COLS[i]} ${CRITERIA[i]}: ${a.checklist[i]} → ${v}`:'').filter(Boolean);
+    if(diff.length){a.checklist=next;log({courseId:a.courseId,action:'Criteria updated',detail:diff.join('; ')});save()}
+    A.cancelCrit(id);toast(diff.length?`Criteria updated (${diff.length} change${diff.length>1?'s':''})`:'No changes')},
+  toggleRecs(id){const b=document.querySelector(`[data-a=toggleRecs][data-id="${id}"]`),open=!openRecs.has(id);
+    open?openRecs.add(id):openRecs.delete(id);b.closest('.recs').classList.toggle('open',open);b.textContent=open?'Show less':`Show ${b.dataset.n} earlier`;$('#tree')?.classList.remove('anim');drawLines()},
   rToday(){rptFrom=rptTo=dayStart(Date.now());render()},
   rWeek(){rptFrom=dayStart(Date.now()-6*DAY);rptTo=dayStart(Date.now());render()},
 };
@@ -423,6 +458,7 @@ document.addEventListener('keydown',e=>{
 document.addEventListener('change',e=>{
   const t=e.target;
   if(t.name&&/^c\d$/.test(t.name)){draft.crit[+t.name.slice(1)]=t.value;renderIssues()}
+  else if(t.name&&/^e\d$/.test(t.name))t.closest('.crit-row').classList.toggle('no',t.value==='No');
   else if(t.name==='fAud')draft.aud=[...document.querySelectorAll('input[name=fAud]:checked')].map(x=>x.value);
   else if(t.id==='userSel'){user=USERS.find(u=>u.id===t.value);closeOv();render();toast(`Now ${user.name} (${user.role})`)}
   else if(['catFilter','statusF','auditedF'].includes(t.id)){
@@ -432,7 +468,6 @@ document.addEventListener('change',e=>{
   else if(t.id==='rTo'){rptTo=fromInput(t.value);render()}
   else if(t.id?.startsWith('iCat'))draft.issues[+t.dataset.i].cat=t.value;
 });
-document.addEventListener('toggle',e=>{const id=e.target.dataset?.tid;if(id)e.target.open?openRecs.add(id):openRecs.delete(id)},true);
 document.addEventListener('input',e=>{
   const t=e.target;
   if(t.id?.startsWith('iDesc'))draft.issues[+t.dataset.i].desc=t.value;

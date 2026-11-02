@@ -130,6 +130,7 @@ button.metric:hover{border-color:var(--muted);border-top-color:var(--tone)}
 .bar .track{height:10px;background:var(--surface-2);border-radius:5px;overflow:hidden}
 .bar .fill{height:100%;background:var(--accent);border-radius:5px}
 .bar .v{text-align:right;font-family:var(--f-mono);font-size:12px}
+.bars.wide .bar{grid-template-columns:minmax(150px,240px) 1fr 28px}
 .alert{display:flex;gap:10px;align-items:flex-start;background:var(--bad-bg);color:var(--bad);border-radius:10px;padding:10px 14px;font-size:13px}
 .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px}
 .kv div{background:var(--surface-2);border-radius:8px;padding:8px 10px;display:flex;flex-direction:column}
@@ -157,8 +158,12 @@ button.metric:hover{border-color:var(--muted);border-top-color:var(--tone)}
 .recs li .mono{font-size:11.5px}
 .recs li b{color:var(--fg);font-weight:600}
 .recs li i{font-style:normal;margin-left:auto;white-space:nowrap}
-.recs summary{cursor:pointer;color:var(--accent);font-weight:600;margin:4px 0 0 12px;width:max-content}
-.recs details ol{margin-top:4px}
+.recs li.old{display:none}
+.recs.open li.old{display:flex;animation:recIn .2s ease-out}
+@keyframes recIn{from{opacity:0;transform:translateY(-3px)}}
+.recs-more{margin:6px 0 0 12px}
+.crit-edit{margin-top:8px}
+.crit-edit .tk-btns{justify-content:flex-end;margin-top:10px}
 .tk-side{display:flex;gap:6px;align-items:center;flex-shrink:0}
 .tk-form{flex-basis:100%;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;padding-top:10px;border-top:1px dashed var(--line)}
 .tk-form .grow{flex:1 1 220px}
@@ -245,7 +250,7 @@ fieldset.aud legend{font-size:12px;font-weight:600;color:var(--muted);padding:0;
 .iter{display:grid;grid-template-columns:36px 100px 1fr;gap:4px 10px;align-items:start;padding:10px 0;border-bottom:1px solid var(--line);font-size:13px}
 .iter:last-child{border-bottom:0}
 .iter .n{font-family:var(--f-mono);color:var(--muted)}
-.iter .chips{grid-column:3}
+.iter .chips,.iter .ck{grid-column:3}
 .chips{display:flex;gap:4px;flex-wrap:wrap}
 .chip{font-family:var(--f-mono);font-size:11px;padding:1px 6px;border-radius:4px}
 .timeline{display:flex;flex-direction:column;border-left:2px solid var(--line);margin:8px 0 0 6px}
@@ -268,7 +273,7 @@ fieldset.aud legend{font-size:12px;font-weight:600;color:var(--muted);padding:0;
   .crit-row{grid-template-columns:1fr;gap:6px}
   .bar{grid-template-columns:96px 1fr 26px}
   .iter{grid-template-columns:30px 1fr}
-  .iter .chips,.iter .body{grid-column:1/-1}
+  .iter .chips,.iter .ck,.iter .body{grid-column:1/-1}
   .tk-eta{margin-left:0;flex-basis:100%}
 }
 /* motion */
