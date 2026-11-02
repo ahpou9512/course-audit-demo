@@ -72,6 +72,8 @@ textarea{width:100%;resize:vertical}
 .fchip{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 12px;cursor:pointer;font-weight:600;font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center}
 .fchip b{font-family:var(--f-mono);font-size:12px;font-weight:500}
 .fchip[aria-pressed="true"]{background:var(--fg);border-color:var(--fg);color:var(--bg)}
+.fchip.mine{margin-left:auto;border-color:var(--accent);color:var(--accent)}
+.fchip.mine[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
 .toolbar{display:flex;flex-direction:column;gap:12px}
 .tb-row{display:flex;gap:8px;flex-wrap:wrap}
 .tb-row input[type=search]{flex:1 1 260px;max-width:420px}
@@ -92,9 +94,13 @@ tr.click:hover td{background:var(--surface-2)}
 .cname{display:flex;flex-direction:column;min-width:220px}
 .cname b{font-weight:600}
 .empty{padding:32px;text-align:center;color:var(--muted)}
-.catlist{display:grid;grid-template-columns:8px max-content max-content;gap:5px 10px;align-items:center;font-size:13px}
+.catlist{display:grid;grid-template-columns:13px max-content max-content;gap:5px 10px;align-items:center;font-size:13px}
 .ci{display:contents}
-.ci .dot{width:8px;height:8px;border-radius:50%;background:currentColor}
+.ci .dot{width:8px;height:8px;border-radius:50%;background:currentColor;justify-self:center}
+.ci .dot.chk{width:13px;height:13px;background:var(--ok);color:#fff;font-size:9px;font-weight:700;display:grid;place-items:center;line-height:1}
+.ci .dot.chk.dis{background:var(--gray)}
+.ci.closed .cn{color:var(--muted);font-weight:500}
+.ci .cs.ok{color:var(--ok);font-weight:600}
 .ci .cn{font-weight:600}
 .ci .cs{color:var(--muted);font-size:12.5px;white-space:nowrap}
 .ci .cs.late{color:var(--bad);font-weight:600}
@@ -113,6 +119,10 @@ tr.click:hover td{background:var(--surface-2)}
 .chead h2{font-size:22px}
 .stats{display:flex;gap:6px 22px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
 .stats b{color:var(--fg);font-weight:600}
+.price-edit{display:inline-flex;gap:6px;align-items:center}
+.price-edit input{width:120px;padding:3px 8px;font-size:13px}
+.aud-edit{flex-wrap:wrap}
+.aud-edit .aud-opt input{width:auto;padding:0}
 
 /* metrics */
 .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
@@ -162,6 +172,7 @@ button.metric:hover{border-color:var(--muted);border-top-color:var(--tone)}
 .recs.open li.old{display:flex;animation:recIn .2s ease-out}
 @keyframes recIn{from{opacity:0;transform:translateY(-3px)}}
 .recs-more{margin:6px 0 0 12px}
+.ci.other>*{opacity:.4} /* .ci is display:contents, so fade its children */
 .crit-edit{margin-top:8px}
 .crit-edit .tk-btns{justify-content:flex-end;margin-top:10px}
 .tk-side{display:flex;gap:6px;align-items:center;flex-shrink:0}
