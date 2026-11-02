@@ -199,6 +199,10 @@ function vCourse(){
 const canPrice=()=>isAud()||isSelm();
 const priceView=c=>`Pricing <b>${esc(c.price||'—')}</b>${canPrice()?` <button class="link small" data-a="editPrice" data-id="${c.id}">Edit</button>`:''}`;
 const audView=c=>`Audience <b>${esc(c.audience||'—')}</b>${canPrice()?` <button class="link small" data-a="editAud" data-id="${c.id}">Edit</button>`:''}`;
+// dashboard breakdown cards can be folded away; the choice is remembered per browser
+const FOLD_KEY='course-audit-fold';
+let fold=(()=>{try{return JSON.parse(localStorage.getItem(FOLD_KEY))||{}}catch(e){return {}}})();
+const foldBtn=k=>`<button class="fold-btn" data-a="fold" data-id="${k}" aria-expanded="${!fold[k]}">${fold[k]?'Show details':'Hide details'}<i>▾</i></button>`;
 const critChips=a=>`<div class="chips">${a.checklist.map((v,j)=>`<span class="chip ${v==='No'?'t-bad':v==='Yes'?'t-ok':'t-gray'}" title="${CRITERIA[j]}">${COLS[j]} ${v==='N/A'?'NA':v[0]}</span>`).join('')}</div>`;
 // the auditor can correct the criteria of the current audit while its tickets are still open
 function critEditor(a){
@@ -330,12 +334,12 @@ function vDash(){
   const inR=S.logs.filter(l=>l.ts>=from&&l.ts<to+DAY), cnt=a=>inR.filter(l=>l.action===a).length;
   return `<div class="head"><h2>Dashboard</h2><button class="btn sm" data-a="reset">Clear all data</button></div>
   <span class="sec-label">Courses</span>
-  <div class="metric hero" style="--tone:var(--accent)"><b>${cs.all}</b><span>All courses</span></div>
-  <div class="metrics">${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to check','--info','verify')}${m(cs.audit,'To audit','--warn','audit')}${m(cs.disc,'Discontinued','--gray','disc')}</div>
+  <div class="metric hero" style="--tone:var(--accent)"><b>${cs.all}</b><span>All courses</span>${foldBtn('courses')}</div>
+  <div class="fold-box${fold.courses?' shut':''}" id="fold-courses"><div class="metrics">${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to check','--info','verify')}${m(cs.audit,'To audit','--warn','audit')}${m(cs.disc,'Discontinued','--gray','disc')}</div></div>
   ${overdue.length?`<div class="alert"><span>⚠</span><div><b>${overdue.length} ticket${overdue.length>1?'s':''} escalated over 7 days with no fix date.</b> SELM and Auditor groups notified: ${overdue.map(t=>`<button class="link" data-a="open" data-id="${t.courseId}">${t.id}</button>`).join(', ')}</div></div>`:''}
   <span class="sec-label">Tickets</span>
-  <div class="metric hero" style="--tone:var(--accent)"><b>${open.length}</b><span>Open tickets</span></div>
-  <div class="metrics">${tm(S.tickets.filter(t=>t.status==='New'||t.status==='Retest Failed').length,'Waiting for SELM','--warn')}${tm(S.tickets.filter(t=>t.status==='Escalated'||t.status==='In Progress').length,'Escalated','--gray')}${tm(S.tickets.filter(t=>t.status===PV_RES||t.status===PV_DIS).length,'Waiting for verification','--info')}${tm(overdue.length,'Over 7-day SLA','--bad')}</div>
+  <div class="metric hero" style="--tone:var(--accent)"><b>${open.length}</b><span>Open tickets</span>${foldBtn('tickets')}</div>
+  <div class="fold-box${fold.tickets?' shut':''}" id="fold-tickets"><div class="metrics">${tm(S.tickets.filter(t=>t.status==='New'||t.status==='Retest Failed').length,'Waiting for SELM','--warn')}${tm(S.tickets.filter(t=>t.status==='Escalated'||t.status==='In Progress').length,'Escalated','--gray')}${tm(S.tickets.filter(t=>t.status===PV_RES||t.status===PV_DIS).length,'Waiting for verification','--info')}${tm(overdue.length,'Over 7-day SLA','--bad')}</div></div>
   <div class="grid2">
     <div class="panel"><h3>Open tickets by category</h3><div class="bars">${catCounts.length?catCounts.map(([c,n])=>`<div class="bar"><span>${esc(c)}</span><div class="track"><div class="fill" style="width:${n/maxC*100}%"></div></div><span class="v">${n}</span></div>`).join(''):'<span class="muted">No open tickets</span>'}</div></div>
     <div class="panel"><h3>Fix ETA by week</h3><div class="bars">${bKeys.length?bKeys.map(k=>`<div class="bar"><span class="mono">${k}</span><div class="track"><div class="fill" style="width:${buckets[k].length/maxB*100}%;${k==='TBD'?'background:var(--warn)':''}"></div></div><span class="v">${buckets[k].length}</span></div>`).join(''):'<span class="muted">Nothing scheduled</span>'}</div></div>
@@ -489,6 +493,8 @@ const A={
     if(!v){$('#audErr').textContent='Choose at least one.';return}
     if(v!==old){c.audience=v;log({courseId:id,action:'Audience updated',detail:`${old||'—'} → ${v}`});save();toast('Audience updated')}
     A.cancelAud(id)},
+  fold(k){fold[k]=!fold[k];try{localStorage.setItem(FOLD_KEY,JSON.stringify(fold))}catch(e){}
+    $('#fold-'+k).classList.toggle('shut',!!fold[k]);$(`.fold-btn[data-id=${k}]`).outerHTML=foldBtn(k)},
   rToday(){rptFrom=rptTo=dayStart(Date.now());render()},
   rWeek(){rptFrom=dayStart(Date.now()-6*DAY);rptTo=dayStart(Date.now());render()},
 };
