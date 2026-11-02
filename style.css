@@ -117,7 +117,8 @@ tr.click:hover td{background:var(--surface-2)}
 /* course header */
 .chead{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start}
 .chead h2{font-size:22px}
-.stats{display:flex;gap:6px 22px;flex-wrap:wrap;font-size:13px;color:var(--muted)}
+.stats{display:flex;gap:6px 22px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted)}
+.stats>span{min-height:29px;display:inline-flex;align-items:center;gap:4px}
 .stats b{color:var(--fg);font-weight:600}
 .price-edit{display:inline-flex;gap:6px;align-items:center}
 .price-edit input{width:120px;padding:3px 8px;font-size:13px}
