@@ -95,8 +95,8 @@ function render(){
   if(animTree)setTimeout(()=>$('#tree')?.classList.remove('anim'),1600);
 }
 function go(name,id){
-  // leaving the page abandons an unfinished re-audit, so the course stays exactly as it was
-  if(draft?.re&&!(name==='course'&&id===draft.courseId)){const c=course(draft.courseId);if(c){c.lockedBy=null;c.lockedAt=null}draft=null;save()}
+  // leaving the page abandons an unfinished audit: the course goes back to how it was and the next audit starts fresh
+  if(draft&&!(name==='course'&&id===draft.courseId)){const c=course(draft.courseId);if(c){c.lockedBy=null;c.lockedAt=null;if(!draft.re)c.auditorStatus='Pending'}draft=null;save()}
   view={name,id};editingT=null;enterAnim=true;rowAnim=true;render();window.scrollTo(0,0)}
 
 /* ---------- courses list ---------- */
@@ -231,7 +231,9 @@ const canPrice=()=>isAud()||isSelm();
 const toPrice=v=>{v=String(v??'').trim();if(!v)return null;const n=Number(v);return Number.isFinite(n)&&n>=0?Math.round(n*100)/100:NaN};
 const fmtPrice=p=>p==null?'—':Number(p).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 // a Healthy course has passed its audit, so its pricing and audience change only through a re-audit
-const canEditInfo=c=>canPrice()&&c.health!=='Healthy'&&c.health!=='Discontinued';
+// pricing and audience come from the audit form; on the card they can only be corrected while tickets are being fixed
+const canEditInfo=c=>canPrice()&&c.health==='Unhealthy'&&!c.lockedBy;
+const refreshInfo=c=>{if($('#priceBox'))$('#priceBox').innerHTML=priceView(c);if($('#audBox'))$('#audBox').innerHTML=audView(c)};
 const priceView=c=>`Pricing <b>${fmtPrice(c.price)}</b>${canEditInfo(c)?` <button class="link small" data-a="editPrice" data-id="${c.id}">Edit</button>`:''}`;
 const audView=c=>`Audience <b>${esc(c.audience||'—')}</b>${canEditInfo(c)?` <button class="link small" data-a="editAud" data-id="${c.id}">Edit</button>`:''}`;
 // dashboard breakdown cards can be folded away; the choice is remembered per browser
@@ -571,11 +573,12 @@ const A={
     const base=last?last.map(v=>v==='N/A'?'N/A':'Yes'):null;
     draft={courseId:id,crit:base?[...base]:Array(8).fill(null),base,price:c.price??'',aud:audList(c.audience),issues:[],re:!!re};save();
     // open the form in place instead of re-rendering the page
+    refreshInfo(c);
     const b=document.querySelector('[data-a=startAudit],[data-a=reaudit]'),p=b?.closest('.panel');if(!p){render();return}
     b.remove();p.insertAdjacentHTML('afterend',`<div class="expander">${auditForm(c)}</div>`);renderIssues();
     const x=p.nextElementSibling;void x.offsetWidth;x.classList.add('open');
     setTimeout(()=>{x.classList.add('done');x.scrollIntoView({behavior:'smooth',block:'nearest'})},460)},
-  cancelAudit(id){const c=course(id),re=draft?.re;c.lockedBy=null;c.lockedAt=null;if(!re)c.auditorStatus='Pending';draft=null;save();
+  cancelAudit(id){const c=course(id),re=draft?.re;c.lockedBy=null;c.lockedAt=null;if(!re)c.auditorStatus='Pending';draft=null;save();refreshInfo(c);
     // fold the form away and put the Start audit button back, without redrawing the page
     const x=$('#auditForm')?.parentElement,p=x?.previousElementSibling;
     if(!x?.classList.contains('expander')||!p?.querySelector('.chead'))return render();

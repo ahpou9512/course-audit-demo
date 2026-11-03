@@ -197,4 +197,4 @@ erDiagram
 - Discontinue 课程：只有 Auditor 或 Course Owner 可以做，一定要写原因；还没关的 ticket 全部变成 `Closed`、`ClosedAs = Cancelled`。
 - Restore 课程：只有 Auditor；课程变回 `Pending Audit`、`AuditStatus = Pending`，等新的 audit。
 - Delete 课程：只有在这门课**没有任何 audit 和 ticket** 时才允许。
-- Pricing 和 Audience：Auditor 或 SELM 可以直接改，但课程是 `Healthy` 或 `Discontinued` 时不能改（re-audit 也不能改；Healthy 的课程要先 re-audit 标出 No、变成 Unhealthy 后才能改）；每次修改都写进 `ACTIVITY_LOGS`。
+- Pricing 和 Audience：在 audit 表单里填；之后只有课程是 `Unhealthy`（ticket 处理中）时，Auditor 或 SELM 才能在课程页直接改，`Pending Audit`、`Healthy`、`Discontinued` 和 audit 进行中都不能改（re-audit 也不能改；Healthy 的课程要先 re-audit 标出 No、变成 Unhealthy 后才能改）；每次修改都写进 `ACTIVITY_LOGS`。
