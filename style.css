@@ -49,7 +49,8 @@ main .wrap{padding-block:20px 60px;display:flex;flex-direction:column;gap:16px}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-fg)}
 .btn.primary:hover{filter:brightness(1.08)}
 .btn.danger{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,var(--line))}
-.btn.okb{background:var(--ok);border-color:var(--ok);color:var(--surface)}
+.btn.okb{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.btn.okb:hover{background:var(--ok-bg);border-color:var(--ok)}
 .btn.sm{padding:4px 10px;font-size:12.5px}
 .link{background:none;border:0;padding:0;color:var(--accent);cursor:pointer;font-weight:600}
 .link:hover{text-decoration:underline;text-underline-offset:2px}
@@ -130,6 +131,7 @@ tr.click:hover td{background:var(--surface-2)}
 
 /* course header */
 .chead{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start}
+.chead-act{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .chead h2{font-size:22px}
 .stats{display:flex;gap:6px 22px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted)}
 .stats>span{min-height:29px;display:inline-flex;align-items:center;gap:4px}
@@ -151,6 +153,7 @@ button.metric:hover{border-color:var(--muted);border-top-color:var(--tone)}
 .metric.hero span{font-size:15px;font-weight:600;color:var(--fg)}
 .hero-sla{font-size:13px;font-weight:600;color:var(--muted)}
 .hero-sla.bad{color:var(--bad)}
+.metric.hero .link.hero-sla{align-self:flex-start;padding:0}
 .metric.hero{position:relative}
 .fold-btn{position:absolute;top:16px;right:18px;display:inline-flex;align-items:center;gap:6px;background:none;border:0;padding:4px 6px;border-radius:6px;font:inherit;font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer}
 .fold-btn:hover{color:var(--fg);background:var(--soft,rgba(0,0,0,.04))}
@@ -219,7 +222,11 @@ html{overflow-y:scroll}
 .tk-form.enter>:nth-child(3){animation-delay:.1s}
 .tk-act.enter{animation:formIn .25s ease-out}
 @keyframes formIn{from{opacity:0;transform:translateY(-6px)}}
-.tk-form .tk-btns .link{align-self:center;margin-left:4px}
+.tk-form{position:relative}
+.tk-form>.tk-btns{flex-basis:100%}
+.tk-back{font-size:15px;line-height:1;padding:4px 11px;margin-left:auto}
+.tk-act .btn .arr{display:inline-block;margin-left:4px;transition:transform .15s}
+.tk-act .btn:hover .arr{transform:translateX(3px)}
 /* inside the form the message gets its own line, so the buttons never move */
 .tk-form .tk-saved{flex-basis:100%}
 .tk-saved{align-self:center;font-size:12.5px;font-weight:600;animation:savedMsg 2.6s ease-out forwards}
@@ -248,6 +255,9 @@ tr.flash td{animation:rowFlash 2s ease-out .3s backwards}
 /* course overview card on top, ticket cards in a grid below */
 .panel.cover{border:2px solid var(--accent);background:var(--accent-soft);border-radius:14px;padding:18px 22px}
 .panel.cover .stats{border-top:1px solid var(--line);padding-top:10px}
+.panel.cover.gone{border-color:var(--gray);background:var(--gray-bg)}
+.fchip.sep{margin-left:14px;position:relative}
+.fchip.sep::before{content:"";position:absolute;left:-9px;top:20%;bottom:20%;width:1px;background:var(--line)}
 .tree-kids{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;min-width:0}
 .tree-kid{display:flex;min-width:0}
 .tree-kid>.tk{flex:1;min-width:0;border:1px solid var(--line);border-radius:12px;background:var(--surface);align-items:flex-start;align-content:flex-start}
