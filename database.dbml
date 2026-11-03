@@ -1,0 +1,148 @@
+// Course Audit Central — database schema (DBML)
+// Paste into https://dbdiagram.io/d to see the diagram. Matches database.md.
+
+Enum UserRole {
+  Auditor
+  SELM
+  CourseOwner
+}
+
+Enum CourseHealth {
+  "Pending Audit"
+  Unhealthy
+  Healthy
+  Discontinued
+}
+
+Enum AuditStatus {
+  Pending      [note: 'waiting for an auditor']
+  "In Progress" [note: 'tickets of this round still open']
+  Completed
+}
+
+Enum AuditResult {
+  Passed
+  Failed
+}
+
+Enum Answer {
+  Yes
+  No
+  "N/A"
+}
+
+Enum TicketStatus {
+  New
+  Escalated
+  "In Progress"
+  "Retest Failed"
+  "Pending Verification - Resolved"
+  "Pending Verification - Cancelled"
+  Closed
+}
+
+Enum ClosedAs {
+  Resolved
+  Cancelled
+}
+
+Table Users {
+  Id int [pk, increment]
+  Name varchar [not null]
+  Email varchar [not null, unique]
+  Role UserRole [not null]
+}
+
+Table Courses {
+  Id int [pk, increment]
+  Code varchar [not null, unique]
+  Name varchar [not null]
+  Type varchar
+  DoceboPrice decimal(10,2) [note: 'null = not filled in yet']
+  Health CourseHealth [not null, default: 'Pending Audit']
+  AuditStatus AuditStatus [not null, default: 'Pending']
+  CurrentAuditId int [ref: > Audits.Id, note: 'the audit of the current round']
+  LockedById int [ref: > Users.Id, note: 'who is auditing right now']
+  LockedAt datetime
+  DiscontinuedAt datetime
+  DiscontinuedById int [ref: > Users.Id]
+  DiscontinueReason varchar
+  CreatedAt datetime [not null]
+}
+
+Table CourseAudiences {
+  CourseId int [ref: > Courses.Id]
+  Audience varchar [note: 'Partner / DSP / Customer / Tailored / TD']
+
+  indexes {
+    (CourseId, Audience) [pk] // composite primary key
+  }
+}
+
+Table Criteria {
+  Id int [pk, increment]
+  Code varchar [note: 'H–O']
+  Label varchar [not null]
+  AllowNA bool [not null, note: 'true only for the first three']
+  SortOrder int [not null]
+}
+
+Table Audits {
+  Id int [pk, increment]
+  CourseId int [not null, ref: > Courses.Id]
+  AuditorId int [not null, ref: > Users.Id]
+  AuditedAt datetime [not null]
+  Result AuditResult [not null]
+  IsReverification bool [not null, default: false]
+  PriceSnapshot decimal(10,2) [note: 'pricing at the time of this audit']
+  AudienceSnapshot varchar
+  Note varchar
+}
+
+Table AuditAnswers {
+  AuditId int [ref: > Audits.Id]
+  CriterionId int [ref: > Criteria.Id]
+  Answer Answer [not null]
+
+  indexes {
+    (AuditId, CriterionId) [pk] // one answer per criterion per audit
+  }
+}
+
+Table Tickets {
+  Id int [pk, increment]
+  Code varchar [not null, unique, note: 'TKT-1001']
+  CourseId int [not null, ref: > Courses.Id]
+  AuditId int [not null, ref: > Audits.Id]
+  Category varchar [not null]
+  Detail varchar [not null]
+  Status TicketStatus [not null, default: 'New']
+  CreatedAt datetime [not null]
+  EscalatedById int [ref: > Users.Id, note: 'the SELM who owns the ticket']
+  EscalatedAt datetime
+  FixDate date
+  Justification varchar [note: 'reason to cancel']
+  Rejection varchar [note: 'why the auditor sent it back']
+  ClosedAt datetime
+  ClosedById int [ref: > Users.Id, note: 'auditor who approved']
+  ClosedAs ClosedAs
+}
+
+Table TicketNotes {
+  Id int [pk, increment]
+  TicketId int [not null, ref: > Tickets.Id]
+  UserId int [not null, ref: > Users.Id]
+  CreatedAt datetime [not null]
+  Text varchar [not null]
+}
+
+Table ActivityLogs {
+  Id int [pk, increment]
+  CreatedAt datetime [not null]
+  ActorId int [not null, ref: > Users.Id]
+  CourseId int [not null, ref: > Courses.Id]
+  TicketId int [ref: > Tickets.Id]
+  AuditId int [ref: > Audits.Id, note: 'set for criteria edits']
+  Action varchar [not null]
+  Detail varchar
+}
