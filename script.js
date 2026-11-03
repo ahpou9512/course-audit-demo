@@ -242,11 +242,13 @@ const auditInfo=(a,prev)=>{const v=(k,f)=>a[k]===undefined?'—':f(a[k]),moved=k
 function critEditor(a){
   return `<div class="crit-edit"><div class="crit">${CRITERIA.map((l,i)=>`<div class="crit-row${a.checklist[i]==='No'?' no':''}"><span>${l}</span>
     <div class="seg" role="radiogroup" aria-label="${l}">${answers(i).map(v=>`<label><input type="radio" name="e${i}" value="${v}"${a.checklist[i]===v?' checked':''}><span class="${v==='Yes'?'y':v==='No'?'n':'na'}">${v}</span></label>`).join('')}</div></div>`).join('')}</div>
-    <div class="tk-btns"><span class="err" id="ckErr-${a.id}" style="margin-right:auto"></span><button class="btn sm" data-a="cancelCrit" data-id="${a.id}">Cancel</button><button class="btn primary sm" data-a="saveCrit" data-id="${a.id}">Save criteria</button></div></div>`;
+    <div class="tk-btns"><span class="err" id="ckErr-${a.id}" style="margin-right:auto"></span><button class="btn primary sm" data-a="saveCrit" data-id="${a.id}">Save criteria</button><button type="button" class="btn sm" data-a="cancelCrit" data-id="${a.id}" aria-label="Back without saving" title="Back without saving">←</button></div></div>`;
 }
-const approveBox=t=>`<div class="tk-approve"><button class="btn approve-big" data-a="approve" data-id="${t.id}"><span>${t.status===PV_DIS?'Approve cancel':'Approve'}</span></button><button class="btn sm" data-a="startReject" data-id="${t.id}">Reject</button></div>`;
+const tkFoot=h=>`<div class="tk-btns tk-act">${h}</div>`;
+const waitText=t=>t.status==='New'?'Waiting for SELM':WORKING.includes(t.status)?`With ${esc(t.escalatedBy||'SELM')}`:'Waiting for auditor';
+const approveBox=t=>`<div class="tk-btns tk-act tk-approve"><button class="btn okb sm approve-big" data-a="approve" data-id="${t.id}"><span>${t.status===PV_DIS?'Approve cancel':'Approve'}</span></button><button class="btn sm" data-a="startReject" data-id="${t.id}">Reject</button></div>`;
 const rejectBox=t=>`<div class="tk-form"><label class="field grow"><span class="req">Why it is rejected</span><input type="text" id="rej-${t.id}" placeholder="What still fails"></label>
-      <div class="tk-btns"><button class="btn sm" data-a="cancelReject">Cancel</button><button class="btn danger sm" data-a="reject" data-id="${t.id}">Send back to SELM</button></div></div>`;
+      <div class="tk-btns"><button class="btn danger sm" data-a="reject" data-id="${t.id}">Send back to SELM</button><button type="button" class="btn sm tk-back" data-a="cancelReject" aria-label="Back without sending" title="Back without sending">←</button></div></div>`;
 // card contents changed, so don't replay the cards' entrance animation
 function relayout(){$('#tree')?.classList.remove('anim')}
 // let a card glide from its old height to its current one
@@ -267,7 +269,7 @@ function swapSelm(id,open){
   const h0=card.offsetHeight;part.outerHTML=open?selmForm(ticket(id)):selmAct(ticket(id));card.querySelector('.tk-act,.tk-form').classList.add('enter');glide(card,h0);return card;
 }
 // while a ticket is still New (no SELM has touched it) the auditor can correct or remove it
-const audAct=t=>`<div class="tk-btns tk-act tk-aud"><button class="link small" data-a="editTk" data-id="${t.id}">Edit</button><span class="muted">·</span><button class="link small danger-link" data-a="rmTk" data-id="${t.id}">Remove</button></div>`;
+const audAct=t=>`<div class="tk-btns tk-act tk-aud"><button class="btn sm" data-a="editTk" data-id="${t.id}">Edit</button><button class="btn danger sm" data-a="rmTk" data-id="${t.id}">Remove</button></div>`;
 const audEdit=t=>`<div class="tk-form tk-aud"><label class="field"><span>Category</span><select id="ekCat-${t.id}">${CATS.map(x=>`<option${x===t.category?' selected':''}>${x}</option>`).join('')}</select></label>
       <label class="field grow"><span class="req">What is wrong</span><input type="text" id="ekDesc-${t.id}" value="${esc(t.detail)}"></label>
       <div class="tk-btns"><button class="btn primary sm" data-a="saveTk" data-id="${t.id}">Save</button><button type="button" class="btn sm tk-back" data-a="cancelTk" data-id="${t.id}" aria-label="Back without saving" title="Back without saving">←</button></div>
@@ -285,29 +287,36 @@ function ticketRow(c,t,st){
   let note='';
   if(t.status==='Retest Failed'&&t.rejection)note=`<div class="tk-note bad"><b>Auditor:</b> ${esc(t.rejection)}</div>`;
   else if(t.status===PV_DIS&&t.justification)note=`<div class="tk-note"><b>Why cancel:</b> ${esc(t.justification)}</div>`;
-  let side='', below='';
-  if(isSelm()&&t.status==='New')side=`<button class="btn primary sm" data-a="escalate" data-id="${t.id}">Escalate</button>`;
-  else if(isSelm()&&WORKING.includes(t.status)&&!mine(t))side=`<span class="muted small">Handled by ${esc(t.escalatedBy)}</span>`;
-  else if(isSelm()&&WORKING.includes(t.status))below=editingT===t.id?selmForm(t):selmAct(t);
+  let below='';
+  if(t.status===CLOSED)below='';
+  else if(isSelm()&&t.status==='New')below=tkFoot(`<button class="btn primary sm" data-a="escalate" data-id="${t.id}">Escalate</button>`);
+  else if(isSelm()&&WORKING.includes(t.status)&&mine(t))below=editingT===t.id?selmForm(t):selmAct(t);
   else if(isAud()&&t.status==='New')below=audAct(t);
-  else if(isAud()&&pv){
-    below=rejecting===t.id?rejectBox(t):approveBox(t);
-  }else if(pv)side=`<span class="muted small">Waiting for auditor</span>`;
+  else if(isAud()&&pv)below=rejecting===t.id?rejectBox(t):approveBox(t);
+  else below=tkFoot(`<span class="muted small">${waitText(t)}</span>`);
   const eta=t.status===CLOSED?`Closed ${fmtD(t.closedAt)} · ${t.closedAs}`:t.fixDate?`ETA ${week(t.fixDate)} · ${fmtD(t.fixDate)}`:'ETA TBD';
   return `<div class="tk${t.id===flashId?' flash':''}" data-tid="${t.id}"><div class="tk-main">
     <div class="tk-top"><span class="mono muted">${t.id}</span><b>${esc(t.category)}</b><span class="st ${tone(t.status)}" title="${esc(t.status)}"><i></i>${esc(shortStatus(t.status))}</span>
       ${isOverdue(t)?`<span class="late">${daysSince(t.escalatedAt)}d no fix date</span>`:''}<span class="tk-eta">${eta}</span></div>
     <div class="tk-desc">${esc(t.detail)}</div>${note}${records(t)}</div>
-    ${side?`<div class="tk-side">${side}</div>`:''}${below}</div>`;
+    ${below}</div>`;
 }
 
 // every action on a ticket, newest first; older entries fold away after the first 3,
 // and a closed ticket hides its whole record list until asked
+// stored action names stay as they are; on screen every row reads as a short past-tense step
+const REC_LABEL={'Ticket created':'Created','Edited by auditor':'Edited','Status → In Progress':'In Progress','Ticket closed':'Closed',
+  'Proposed cancellation':'Cancel requested','Proposed discontinuation':'Cancel requested','Cancellation rejected':'Cancel rejected',
+  'Discontinuation rejected':'Cancel rejected','Retest failed':'Rejected','Note added':'Note'};
+const REC_QUIET=new Set(['Sent for auditor verification','Fix date saved']); // details that only repeat the action
+const recDetail=l=>{const d=(l.detail||'').replace(/ · by the auditor$/,'');return REC_QUIET.has(d)?'':d};
 function records(t){
   const recs=S.logs.filter(l=>l.ticketId===t.id).reverse(); // logs are stored oldest first
-  recs.push({ts:t.createdAt,actor:'',action:'Ticket created',detail:''});
+  // a ticket added after the audit already has its own first row; others start with the audit that raised them
+  if(!recs.some(l=>l.action==='Added after audit'))recs.push({ts:t.createdAt,actor:S.audits.find(a=>a.id===t.auditId)?.auditor||'',action:'Ticket created',detail:''});
   const closed=t.status===CLOSED, keep=closed?0:3;
-  const row=(l,i)=>`<li${i>=keep?' class="old"':''}><span class="mono">${fmtDT(l.ts)}</span><b>${esc(l.action)}</b>${l.detail?`<span>${esc(l.detail)}</span>`:''}${l.actor&&l.actor!==recs[i-1]?.actor?`<i>${esc(l.actor)}</i>`:''}</li>`; // name only where the person changes
+  // time · step · person on one line, any detail on the line below; the name shows only where the person changes
+  const row=(l,i)=>{const d=recDetail(l);return `<li${i>=keep?' class="old"':''}><span class="mono">${fmtDT(l.ts)}</span><b>${esc(REC_LABEL[l.action]||l.action)}</b>${l.actor&&l.actor!==recs[i-1]?.actor?`<i>${esc(l.actor)}</i>`:''}${d?`<span class="rd">${esc(d)}</span>`:''}</li>`};
   const more=recs.length-keep, open=openRecs.has(t.id);
   const on=closed?'Hide records':'Show less', off=closed?`Show records (${more})`:`Show ${more} earlier`;
   // one list: older rows unfold under the first 3, and the toggle stays at the bottom
@@ -522,7 +531,7 @@ const A={
     if(!cat||!desc){$('#tkErr').textContent=!cat?'Choose a category.':'Describe what is wrong.';return (!cat?$('#tkCat'):$('#tkDesc')).focus()}
     const t={id:'TKT-'+S.seq.t++,courseId:id,auditId:c.cycleAuditId,category:cat,detail:desc,status:'New',createdAt:Date.now(),
       escalatedAt:null,escalatedBy:null,fixDate:null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};
-    S.tickets.push(t);c.health='Unhealthy';tlog(t,'Added after audit',`${cat} · by the auditor`);flashId=t.id;save();render();toast(`${t.id} added`)},
+    S.tickets.push(t);c.health='Unhealthy';tlog(t,'Added after audit',cat);flashId=t.id;save();render();toast(`${t.id} added`)},
   toggleEdits(id){const box=$('#ae-'+id),open=!openEdits.has(id);open?openEdits.add(id):openEdits.delete(id);
     box.classList.toggle('open',open);box.querySelector('[data-a=toggleEdits]').textContent=open?'Hide changes':'Show changes'},
   toggleHist(id){const h=$('#hist-'+id),b=document.querySelector(`[data-a=toggleHist][data-id="${id}"]`),open=!openHist.has(id),n=+b.dataset.n;

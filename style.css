@@ -196,14 +196,15 @@ html{overflow-y:scroll}
 .recs{margin-top:8px;font-size:12.5px}
 .recs-h{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;margin-bottom:4px}
 .recs ol{list-style:none;margin:0;padding:0 0 0 10px;border-left:2px solid var(--line);display:flex;flex-direction:column;gap:4px}
-.recs li{display:flex;gap:4px 8px;flex-wrap:wrap;align-items:baseline;color:var(--muted)}
+.recs li{display:grid;grid-template-columns:max-content 1fr max-content;column-gap:8px;row-gap:1px;align-items:baseline;color:var(--muted)}
+.recs li .rd{grid-column:2/-1}
 .recs li .mono{font-size:11.5px}
 .recs li b{color:var(--fg);font-weight:600}
-.recs li i{font-style:normal;margin-left:auto;white-space:nowrap}
+.recs li i{font-style:normal;grid-column:3;white-space:nowrap}
 /* long unbroken text (notes, descriptions) wraps inside the card instead of spilling out */
 .recs li>span:not(.mono),.tk-desc,.tk-note{min-width:0;overflow-wrap:anywhere}
 .recs li.old{display:none}
-.recs.open li.old{display:flex}
+.recs.open li.old{display:grid}
 .recs.reveal.open li.old{animation:recIn .2s ease-out}
 @keyframes recIn{from{opacity:0;transform:translateY(-3px)}}
 .recs-more{margin:6px 0 0 12px}
@@ -212,11 +213,10 @@ html{overflow-y:scroll}
 .ci.other>*{opacity:.4} /* .ci is display:contents, so fade its children */
 .crit-edit{margin-top:8px}
 .crit-edit .tk-btns{justify-content:flex-end;margin-top:10px}
-.tk-side{display:flex;gap:6px;align-items:center;flex-shrink:0}
 .tk-form{flex-basis:100%;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;padding-top:10px;border-top:1px dashed var(--line)}
 .tk-form .grow{flex:1 1 220px}
 .tk-btns{display:flex;gap:6px;flex-wrap:wrap}
-.tk-act{flex-basis:100%;align-items:center;padding-top:10px;border-top:1px dashed var(--line)}
+.tk-act{flex-basis:100%;align-items:center;min-height:40px;padding-top:10px;border-top:1px dashed var(--line)}
 .danger-link{color:var(--bad)}
 .tk-aud.enter{animation:formIn .25s ease-out}
 .tk-add{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;padding:12px 14px;border:1px dashed var(--accent);border-radius:12px;background:var(--accent-soft);animation:formIn .25s ease-out}
@@ -241,7 +241,7 @@ html{overflow-y:scroll}
 .recs li.new{animation:recNew 2s ease-out}
 @keyframes recNew{0%,30%{background:var(--accent-soft)}}
 .tk-approve{flex-basis:100%;display:flex;gap:8px;align-items:center}
-.approve-big{flex:1;position:relative;overflow:hidden;padding:10px 14px;font-size:14px;color:var(--ok);border:1.5px solid var(--ok);background:var(--surface)}
+.approve-big{position:relative;overflow:hidden}
 .approve-big:hover{background:var(--ok-bg);border-color:var(--ok)}
 .approve-big::before{content:"";position:absolute;inset:0 auto 0 0;width:0;background:var(--ok);transition:width .6s ease-in-out}
 .approve-big span{position:relative;z-index:1;transition:color .2s .3s}
@@ -266,7 +266,10 @@ tr.flash td{animation:rowFlash 2s ease-out .3s backwards}
 .tree-kids{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px;min-width:0}
 .tree-kid{display:flex;min-width:0}
 .tree-kid>.tk{flex:1;min-width:0;border:1px solid var(--line);border-radius:12px;background:var(--surface);align-items:flex-start;align-content:flex-start}
-.tree-kid .tk-main{flex-basis:100%}
+.tree-kid>.tk{flex-direction:column;flex-wrap:nowrap;align-items:stretch}
+.tree-kid .tk-main{flex:0 0 auto}
+/* every footer sits on the bottom edge, so footers line up across a row of cards */
+.tree-kid .tk>.tk-act,.tree-kid .tk>.tk-form{flex:0 0 auto;margin-top:auto}
 .tree.anim .tree-kid{animation:treeIn .4s ease-out both;animation-delay:calc(.2s + var(--i) * .08s)}
 @keyframes treeIn{from{opacity:0;transform:translateY(10px)}}
 .closed-kids{margin-top:10px}
