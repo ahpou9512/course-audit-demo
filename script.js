@@ -2,7 +2,7 @@
 const DAY=864e5, KEY='course-audit-demo-v4';
 const CRITERIA=['Search on Dell Learning works','Course Description (PDF) works','Enrollment works','Launch URL works',
   'Course launches on first attempt','No error page','No access denied','Completion recorded'];
-const COLS='HIJKLMNO';
+
 const answers=i=>i<3?['Yes','No','N/A']:['Yes','No']; // only H–J can be N/A
 const AUDIENCES=['Partner','DSP','Customer','Tailored','TD'];
 const CATS=['Content','Edutube','Course Setup','Learning Plan Setup','Pricing','CD PDF','IT issue','Other'];
@@ -81,6 +81,7 @@ function load(){try{let v=localStorage.getItem(KEY);if(!v)return null;
 function fresh(){S={courses:[],audits:[],tickets:[],logs:[],seq:{t:1001,a:1,c:1,l:1}};save()}
 
 /* ---------- shell ---------- */
+let openHist=new Set(), openEdits=new Set(); // courses whose older audits are unfolded; audits whose criteria edits are listed
 let animTree=false, animatedFor=null, enterAnim=true, rowAnim=true, flashId=null, editingT=null; // editingT: ticket whose SELM form is open
 function render(){
   if(view.name==='course'){animTree=animatedFor!==view.id;animatedFor=view.id}else{animTree=false;animatedFor=null}
@@ -198,10 +199,11 @@ function vCourse(){
     <div class="tree${animTree?' anim':''}" id="tree"><div class="tree-kids">${open.map((t,i)=>`<div class="tree-kid" style="--i:${i}">${ticketRow(c,t,st)}</div>`).join('')}</div></div>`:''}
     ${closed.length?`<details><summary>Closed tickets (${closed.length})</summary><div class="tree-kids closed-kids">${closed.map(t=>`<div class="tree-kid">${ticketRow(c,t,st)}</div>`).join('')}</div></details>`:''}</div>`:''}
   <div class="panel"><h3>Audit history</h3>
-    ${runs.length?`<div>${runs.map((a,i)=>`<div class="iter"><span class="n">#${runs.length-i}</span><span class="mono">${fmtD(a.date)}</span>
+    ${runs.length?`<div class="hist${openHist.has(c.id)?' open':''}" id="hist-${c.id}">${runs.map((a,i)=>`<div class="iter${i>=3?' old':''}"><span class="n">#${runs.length-i}</span><span class="mono">${fmtD(a.date)}</span>
       <div class="body" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${pill(a.result)}<span>${esc(a.auditor)}</span>${a.note?`<span class="muted small">${esc(a.note)}</span>`:''}
         ${a.checklist&&isAud()&&a.id===c.cycleAuditId&&open.length?`<button class="link small" data-a="editCrit" data-id="${a.id}">Edit criteria</button>`:''}</div>
-      ${a.checklist?`<div class="ck" id="ck-${a.id}">${critChips(a)}</div>`:''}</div>`).join('')}</div>`
+      ${a.checklist?`<div class="ck" id="ck-${a.id}">${critChips(a)}</div>`:''}${auditInfo(a,runs[i+1])}${editTrail(a)}</div>`).join('')}</div>
+    ${runs.length>3?`<button type="button" class="link small hist-more" data-a="toggleHist" data-id="${c.id}" data-n="${runs.length-3}">${openHist.has(c.id)?'Show less':`Show ${runs.length-3} earlier audit${runs.length-3>1?'s':''}`}</button>`:''}`
     :'<span class="muted">Not audited yet.</span>'}
   </div>`;
 }
@@ -222,7 +224,20 @@ const audView=c=>`Audience <b>${esc(c.audience||'—')}</b>${canEditInfo(c)?` <b
 const FOLD_KEY='course-audit-fold';
 let fold=(()=>{try{return JSON.parse(localStorage.getItem(FOLD_KEY))||{}}catch(e){return {}}})();
 const foldBtn=k=>`<button class="fold-btn" data-a="fold" data-id="${k}" aria-expanded="${!fold[k]}"><span class="fl"><span>Hide details</span><span>Show details</span></span><i>▾</i></button>`;
-const critChips=a=>`<div class="chips">${a.checklist.map((v,j)=>`<span class="chip ${v==='No'?'t-bad':v==='Yes'?'t-ok':'t-gray'}" title="${CRITERIA[j]}">${COLS[j]} ${v==='N/A'?'NA':v[0]}</span>`).join('')}</div>`;
+// who changed this audit's answers afterwards, newest first; the changes unfold under the summary line
+function editTrail(a){
+  const ed=S.logs.filter(l=>l.action==='Criteria updated'&&l.auditId===a.id).reverse();if(!ed.length)return '';
+  const open=openEdits.has(a.id),last=ed[0];
+  return `<div class="aedit${open?' open':''}" id="ae-${a.id}"><div class="aedit-h">✎ Edited ${ed.length} time${ed.length>1?'s':''} · last by ${esc(last.actor)}, ${fmtDT(last.ts)}
+    <button type="button" class="link small" data-a="toggleEdits" data-id="${a.id}">${open?'Hide changes':'Show changes'}</button></div>
+    <ol>${ed.map(l=>`<li><span class="mono">${fmtDT(l.ts)}</span><b>${esc(l.actor)}</b><span class="chg-list">${l.detail.split('; ').map(esc).join('<br>')}</span></li>`).join('')}</ol></div>`;
+}
+const critChips=a=>{const no=CRITERIA.filter((_,j)=>a.checklist[j]==='No'),yes=a.checklist.filter(v=>v==='Yes').length,na=a.checklist.filter(v=>v==='N/A').length;
+  return `<div class="chips crit-sum">${no.map(l=>`<span class="cchip t-bad">✕ ${esc(l)}</span>`).join('')}<span class="cchip t-ok">✓ ${no.length?`${yes} Yes`:'All Yes'}</span>${na?`<span class="cchip t-gray">${na} N/A</span>`:''}</div>`};
+// pricing and audience as they were at that audit; a value that differs from the audit before it shows what it was
+const auditInfo=(a,prev)=>{const v=(k,f)=>a[k]===undefined?'—':f(a[k]),moved=k=>prev&&a[k]!==undefined&&prev[k]!==undefined&&prev[k]!==a[k];
+  const part=(l,k,f)=>`<span>${l} ${moved(k)?`<s>${esc(f(prev[k]))}</s> → <b class="chg">${esc(v(k,f))}</b>`:`<b>${esc(v(k,f))}</b>`}</span>`;
+  return `<div class="ainfo">${part('Pricing','price',fmtPrice)}${part('Audience','audience',x=>x||'—')}</div>`};
 // the auditor can correct the criteria of the current audit while its tickets are still open
 function critEditor(a){
   return `<div class="crit-edit"><div class="crit">${CRITERIA.map((l,i)=>`<div class="crit-row${a.checklist[i]==='No'?' no':''}"><span>${l}</span>
@@ -294,10 +309,12 @@ function auditForm(c){
   return `<form class="audit" id="auditForm" novalidate>
   <div class="audit-h"><h3>Audit #${S.audits.filter(a=>a.courseId===c.id).length+1}</h3><button type="button" class="btn sm" data-a="cancelAudit" data-id="${c.id}">Cancel audit</button></div>
   <div class="audit-b">
-    <div class="info-fields">
+    ${d.re?`<div class="info-fields locked"><div class="field"><span>Docebo pricing</span><b>${fmtPrice(c.price)}</b></div>
+      <div class="field"><span>Catalog audience</span><b>${esc(c.audience||'—')}</b></div></div>`
+    :`<div class="info-fields">
       <label class="field"><span>Docebo pricing</span><input type="text" id="fPrice" inputmode="decimal" autocomplete="off" value="${esc(d.price)}"></label>
       <fieldset class="aud"><legend class="req">Catalog audience</legend><div class="aud-opts">${AUDIENCES.map(a=>`<label class="aud-opt"><input type="checkbox" name="fAud" value="${a}"${d.aud.includes(a)?' checked':''}> ${a}</label>`).join('')}</div></fieldset>
-    </div>
+    </div>`}
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="sec-label">Criteria</span><button type="button" class="btn sm" data-a="markAllYes">All Yes</button></div>
     <div class="crit">${CRITERIA.map((l,i)=>`<div class="crit-row${d.crit[i]==='No'?' no':''}" id="cr${i}"><span>${l}</span>
       <div class="seg" role="radiogroup" aria-label="${l}">${answers(i).map(v=>`<label><input type="radio" name="c${i}" value="${v}"${d.crit[i]===v?' checked':''}><span class="${v==='Yes'?'y':v==='No'?'n':'na'}">${v}</span></label>`).join('')}</div></div>`).join('')}</div>
@@ -323,6 +340,9 @@ function submitAudit(){
   if(!draft.aud.length)return err('Choose at least one catalog audience.');
   const price=toPrice(draft.price);
   if(Number.isNaN(price))return err('Docebo pricing must be a number of 0 or more.');
+  // a re-audit is saved when it finds a No or changes an answer (e.g. Yes → N/A); otherwise Cancel audit keeps it as it was
+  if(draft.re&&!draft.crit.includes('No')&&draft.base&&draft.crit.join()===draft.base.join())
+    return err('Nothing changed. Mark a criterion No or N/A, or use Cancel audit to keep it Healthy.');
   c.price=price;c.audience=draft.aud.join(', ');
   const info={price:c.price,audience:c.audience}, ts=Date.now();
   const started=c.lockedAt?` · started ${fmtDT(c.lockedAt)}`:'';
@@ -463,13 +483,19 @@ const A={
     S.courses.push(c);log({courseId:c.id,action:'Course registered',detail:'Manual entry'});save();closeOv();render();toast(`${code} added`)},
   close:closeOv,
   toggleMine(){myF=!myF;refreshRows()},
+  toggleEdits(id){const box=$('#ae-'+id),open=!openEdits.has(id);open?openEdits.add(id):openEdits.delete(id);
+    box.classList.toggle('open',open);box.querySelector('[data-a=toggleEdits]').textContent=open?'Hide changes':'Show changes'},
+  toggleHist(id){const h=$('#hist-'+id),b=document.querySelector(`[data-a=toggleHist][data-id="${id}"]`),open=!openHist.has(id),n=+b.dataset.n;
+    open?openHist.add(id):openHist.delete(id);h.classList.add('reveal');h.classList.toggle('open',open);b.textContent=open?'Show less':`Show ${n} earlier audit${n>1?'s':''}`},
   tkHl(id){tkF=tkF===id?'':id;refreshRows()},
   clearF(){search='';catFilter='';tkF='';auditedF='';filter='all';myF=false;
     $('#search').value='';['statusF','catFilter','auditedF'].forEach(id=>{$('#'+id).value='';$('#'+id).classList.remove('on')});refreshRows()},
   reset(){openModal(`<div class="ov-h"><h3>Clear all data?</h3><button class="x" data-a="close" aria-label="Close">×</button></div><div class="ov-b">All courses, audits, tickets and history in this browser will be removed.</div><div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn danger" data-a="doReset">Clear</button></div>`)},
   doReset(){fresh();draft=null;closeOv();go('courses');toast('All data cleared')},
   startAudit(id,re){const c=course(id);c.lockedBy=user.name;c.lockedAt=Date.now();if(!re)c.auditorStatus='In Progress';
-    draft={courseId:id,crit:Array(8).fill(null),price:c.price??'',aud:audList(c.audience),issues:[],re:!!re};save();
+    const last=re?S.audits.filter(a=>a.courseId===id&&a.checklist?.length===8).sort((a,b)=>b.date-a.date)[0]?.checklist:null;
+    const base=last?last.map(v=>v==='N/A'?'N/A':'Yes'):null;
+    draft={courseId:id,crit:base?[...base]:Array(8).fill(null),base,price:c.price??'',aud:audList(c.audience),issues:[],re:!!re};save();
     // open the form in place instead of re-rendering the page
     const b=document.querySelector('[data-a=startAudit],[data-a=reaudit]'),p=b?.closest('.panel');if(!p){render();return}
     b.remove();p.insertAdjacentHTML('afterend',`<div class="expander">${auditForm(c)}</div>`);renderIssues();
@@ -483,7 +509,7 @@ const A={
     x.classList.remove('done','open');
     setTimeout(()=>{x.remove();p.querySelector('.chead-act').insertAdjacentHTML('afterbegin',re?`<button class="btn" data-a="reaudit" data-id="${c.id}">Re-audit</button>`
       :`<button class="btn primary" data-a="startAudit" data-id="${c.id}">Start audit</button>`)},460)},
-  markAllYes(){draft.crit=draft.crit.map(v=>v||'Yes');document.querySelectorAll('#auditForm input[type=radio]').forEach(r=>r.checked=draft.crit[+r.name.slice(1)]===r.value);renderIssues()},
+  markAllYes(){draft.crit=draft.crit.map(v=>v||'Yes');$('#formErr').textContent='';document.querySelectorAll('#auditForm input[type=radio]').forEach(r=>r.checked=draft.crit[+r.name.slice(1)]===r.value);renderIssues()},
   addIssue(){draft.issues.push({desc:'',cat:''});renderIssues();$(`#iDesc${draft.issues.length-1}`)?.focus()},
   rmIssue(i){draft.issues.splice(+i,1);renderIssues()},
   // a discontinued course no longer exists: it leaves the active queues and its open tickets are cancelled
@@ -559,8 +585,11 @@ const A={
     const next=CRITERIA.map((_,i)=>document.querySelector(`#ck-${id} input[name=e${i}]:checked`)?.value||a.checklist[i]);
     // open tickets mean the course still has a failing criterion
     if(!next.includes('No')&&openOf(a.courseId).length){$('#ckErr-'+id).textContent='Keep at least one No while tickets are open.';return}
-    const diff=next.map((v,i)=>v!==a.checklist[i]?`${COLS[i]} ${CRITERIA[i]}: ${a.checklist[i]} → ${v}`:'').filter(Boolean);
-    if(diff.length){a.checklist=next;log({courseId:a.courseId,action:'Criteria updated',detail:diff.join('; ')});save()}
+    const diff=next.map((v,i)=>v!==a.checklist[i]?`${CRITERIA[i]}: ${a.checklist[i]} → ${v}`:'').filter(Boolean);
+    if(diff.length){a.checklist=next;log({courseId:a.courseId,auditId:a.id,action:'Criteria updated',detail:diff.join('; ')});save();
+      // refresh the edit trail under this audit in place
+      const ae=$('#ae-'+id),html=editTrail(a);if(ae)ae.outerHTML=html;else $('#ck-'+id).closest('.iter').insertAdjacentHTML('beforeend',html);
+      $('#ae-'+id)?.classList.add('fresh')}
     A.cancelCrit(id);toast(diff.length?`Criteria updated (${diff.length} change${diff.length>1?'s':''})`:'No changes')},
   toggleRecs(id){const b=document.querySelector(`[data-a=toggleRecs][data-id="${id}"]`),open=!openRecs.has(id);
     open?openRecs.add(id):openRecs.delete(id);b.closest('.recs').classList.toggle('open',open);b.closest('.recs').classList.add('reveal');b.textContent=open?b.dataset.on:b.dataset.off;relayout()},
@@ -600,9 +629,9 @@ document.addEventListener('keydown',e=>{
 });
 document.addEventListener('change',e=>{
   const t=e.target;
-  if(t.name&&/^c\d$/.test(t.name)){draft.crit[+t.name.slice(1)]=t.value;renderIssues()}
+  if(t.name&&/^c\d$/.test(t.name)){draft.crit[+t.name.slice(1)]=t.value;$('#formErr').textContent='';renderIssues()}
   else if(t.name&&/^e\d$/.test(t.name))t.closest('.crit-row').classList.toggle('no',t.value==='No');
-  else if(t.name==='fAud')draft.aud=[...document.querySelectorAll('input[name=fAud]:checked')].map(x=>x.value);
+  else if(t.name==='fAud'){draft.aud=[...document.querySelectorAll('input[name=fAud]:checked')].map(x=>x.value);$('#formErr').textContent=''}
   else if(t.id==='userSel'){user=USERS.find(u=>u.id===t.value);closeOv();render();toast(`Now ${user.name} (${user.role})`)}
   else if(t.id==='statusF'){filter=t.value||'all';refreshRows()}
   else if(['catFilter','auditedF'].includes(t.id)){
@@ -617,7 +646,7 @@ document.addEventListener('input',e=>{
   // pricing boxes are plain text boxes that keep only digits and one decimal point (2 places)
   if(t.id==='fPrice'||t.id==='priceIn'){const v=t.value.replace(/[^\d.]/g,'').replace(/(\..*)\./g,'$1').replace(/(\.\d{2})\d+/,'$1');if(v!==t.value)t.value=v}
   if(t.id?.startsWith('iDesc'))draft.issues[+t.dataset.i].desc=t.value;
-  else if(t.id==='fPrice')draft.price=t.value;
+  else if(t.id==='fPrice'){draft.price=t.value;$('#formErr').textContent=''}
   // only refresh the table body so the search box keeps focus, scroll and IME composition
   else if(t.id==='search'){search=t.value;$('#courseRows').innerHTML=courseRows()}
   else if(t.id==='histQ'){histQ=t.value;$('#histRows').innerHTML=histRows()}

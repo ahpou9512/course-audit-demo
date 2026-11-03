@@ -282,6 +282,7 @@ details[open]>summary::before{content:"▾ "}
 .audit-b{padding:16px;display:flex;flex-direction:column;gap:16px}
 .audit-f{padding:12px 16px;border-top:1px solid var(--line);display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;align-items:center}
 .info-fields{display:grid;grid-template-columns:minmax(140px,200px) 1fr;gap:12px}
+.info-fields.locked b{font-weight:600;padding:6px 0}
 fieldset.aud{border:0;padding:0;margin:0;min-width:0}
 fieldset.aud legend{font-size:12px;font-weight:600;color:var(--muted);padding:0;margin-bottom:4px}
 .aud-opts{display:flex;flex-wrap:wrap;gap:6px}
@@ -309,8 +310,28 @@ fieldset.aud legend{font-size:12px;font-weight:600;color:var(--muted);padding:0;
 /* history */
 .iter{display:grid;grid-template-columns:36px 100px 1fr;gap:4px 10px;align-items:start;padding:10px 0;border-bottom:1px solid var(--line);font-size:13px}
 .iter:last-child{border-bottom:0}
+.hist .iter.old{display:none}
+.hist.open .iter.old{display:grid}
+.hist.reveal.open .iter.old{animation:recIn .2s ease-out}
+.hist:not(.open) .iter:nth-child(3){border-bottom:0}
+.hist-more{align-self:flex-start}
 .iter .n{font-family:var(--f-mono);color:var(--muted)}
-.iter .chips,.iter .ck{grid-column:3}
+.iter .chips,.iter .ck,.iter .ainfo,.iter .aedit{grid-column:3}
+.aedit{font-size:12.5px;color:var(--muted)}
+.aedit-h{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.aedit ol{display:none;list-style:none;margin:6px 0 0;padding:0 0 0 10px;border-left:2px solid var(--line)}
+.aedit.open ol{display:flex;flex-direction:column;gap:6px;animation:recIn .2s ease-out}
+.aedit li{display:grid;grid-template-columns:max-content max-content 1fr;gap:10px;align-items:baseline}
+.aedit li .mono{font-size:11.5px}
+.aedit li b{color:var(--fg);font-weight:600}
+.aedit .chg-list{color:var(--fg)}
+.aedit.fresh .aedit-h{animation:flash 1.4s ease-out}
+.crit-sum{gap:6px}
+.cchip{font-size:12px;font-weight:600;padding:2px 8px;border-radius:999px}
+.ainfo{display:flex;gap:4px 18px;flex-wrap:wrap;color:var(--muted);font-size:12.5px}
+.ainfo b{color:var(--fg);font-weight:600}
+.ainfo s{color:var(--muted)}
+.ainfo .chg{color:var(--accent)}
 .chips{display:flex;gap:4px;flex-wrap:wrap}
 .chip{font-family:var(--f-mono);font-size:11px;padding:1px 6px;border-radius:4px}
 .timeline{display:flex;flex-direction:column;border-left:2px solid var(--line);margin:8px 0 0 6px}
@@ -333,7 +354,8 @@ fieldset.aud legend{font-size:12px;font-weight:600;color:var(--muted);padding:0;
   .crit-row{grid-template-columns:1fr;gap:6px}
   .bar{grid-template-columns:96px 1fr 26px}
   .iter{grid-template-columns:30px 1fr}
-  .iter .chips,.iter .ck,.iter .body{grid-column:1/-1}
+  .iter .chips,.iter .ck,.iter .ainfo,.iter .aedit,.iter .body{grid-column:1/-1}
+  .aedit li{grid-template-columns:1fr}
   .tk-eta{margin-left:0;flex-basis:100%}
 }
 /* motion */

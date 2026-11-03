@@ -187,11 +187,11 @@ erDiagram
 - 全部 ticket 关闭后，自动建一次 re-verification audit（`IsReverification = true`），答案全部是 `Yes`，原本 `N/A` 的保持 `N/A`。
 - SLA：`Status = Escalated`、`FixDate` 是空的、而且 `EscalatedAt` 超过 7 天，就算超时。
 - 一门课同一时间只能有一个人 audit（`LockedById`）；锁太久没提交（例如超过一天）要自动解除。
-- Re-audit 时课程保持 `Healthy`，直到提交结果；结果有 `No` 才变成 `Unhealthy`。
+- Re-audit 时课程保持 `Healthy`，直到提交结果；re-audit 要有 `No`，或有答案改变（例如 Yes → N/A）才能提交；完全没变就取消，不留记录。有 `No` 提交后变成 `Unhealthy`，只改成 N/A 的话保持 `Healthy`。
 - 只有 escalate 的 SELM（`EscalatedById`）可以更新、Resolve 或 Cancel 那张 ticket；只有 Auditor 可以 Approve 或 Reject。
 - Ticket 填了 `FixDate` 就从 `Escalated` 变成 `In Progress`。
 - Cancel ticket 一定要写原因（存在 `Justification`），Auditor 确认后 `ClosedAs = Cancelled`，课程不会下架。
 - Discontinue 课程：只有 Auditor 或 Course Owner 可以做，一定要写原因；还没关的 ticket 全部变成 `Closed`、`ClosedAs = Cancelled`。
 - Restore 课程：只有 Auditor；课程变回 `Pending Audit`、`AuditStatus = Pending`，等新的 audit。
 - Delete 课程：只有在这门课**没有任何 audit 和 ticket** 时才允许。
-- Pricing 和 Audience：Auditor 或 SELM 可以直接改，但课程是 `Healthy` 或 `Discontinued` 时不能改（Healthy 的课程要透过 re-audit 才能改）；每次修改都写进 `ACTIVITY_LOGS`。
+- Pricing 和 Audience：Auditor 或 SELM 可以直接改，但课程是 `Healthy` 或 `Discontinued` 时不能改（re-audit 也不能改；Healthy 的课程要先 re-audit 标出 No、变成 Unhealthy 后才能改）；每次修改都写进 `ACTIVITY_LOGS`。
