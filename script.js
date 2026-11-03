@@ -164,7 +164,7 @@ function vCourse(){
   else if(st==='audit'&&c.lockedBy&&c.lockedBy!==user.name)btn=`<span class="muted small">🔒 Being audited by ${esc(c.lockedBy)}</span>`;
   else if(st==='healthy'&&(isAud()||isOwner()))btn=`<button class="btn" data-a="reaudit" data-id="${c.id}">Queue re-audit</button>`;
   else if(st==='audit'&&!isAud())btn=`<span class="muted small">Waiting for an auditor</span>`;
-  const stats=`<div class="stats"><span>Audits <b>${c.auditCount}</b></span><span>Last audited <b>${fmtD(c.lastAudited)}</b>${c.lastAudited?` (${daysSince(c.lastAudited)}d ago)`:''}</span>
+  const stats=`<div class="stats"><span>Audits <b>${runs.length}</b></span><span>Last audited <b>${fmtD(c.lastAudited)}</b>${c.lastAudited?` (${daysSince(c.lastAudited)}d ago)`:''}</span>
       <span>By <b>${esc(c.lastAuditor||'—')}</b></span><span id="priceBox">${priceView(c)}</span><span id="audBox">${audView(c)}</span></div>`;
   return `<button class="link back" data-a="go" data-id="courses">← All courses</button>
   <div class="panel cover"><div class="chead"><div style="display:flex;flex-direction:column;gap:6px">
@@ -305,7 +305,7 @@ function submitAudit(){
     const a=addAudit(c,'Failed',[...draft.crit],info,draft.issues.map(x=>({...x})));
     const made=draft.issues.map(x=>{const t={id:'TKT-'+S.seq.t++,courseId:c.id,auditId:a.id,category:x.cat,detail:x.desc.trim(),status:'New',createdAt:ts,
       escalatedAt:null,escalatedBy:null,fixDate:null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};S.tickets.push(t);return t});
-    c.health='Unhealthy';c.auditorStatus='In Progress';c.cycleAuditId=a.id;
+    c.health='Unhealthy';c.auditorStatus='In Progress';c.cycleAuditId=a.id;c.lastAudited=ts;c.lastAuditor=user.name;
     log({courseId:c.id,ticketIds:made.map(t=>t.id),action:'Audit failed',detail:`${made.length} ticket(s) created: ${made.map(t=>`${t.id} ${t.category}`).join(', ')}${started}`});
     var msg=`Unhealthy · created ${made.map(t=>t.id).join(', ')}`, fill='--bad', label=`${made.length} ticket${made.length>1?'s':''} created`;
   }else{
@@ -457,7 +457,10 @@ const A={
     <div class="ov-b"><p style="margin:0">Are you sure you want to re-audit <b>${esc(c.code)}</b> · ${esc(c.name)}? It goes back to the To audit queue for an auditor to check again.</p></div>
     <div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="doReaudit" data-id="${c.id}">Queue re-audit</button></div>`)},
   doReaudit(id){closeOv();const c=course(id);c.auditorStatus='Pending';log({courseId:c.id,action:'Re-audit queued',detail:''});save();render();toast('Queued for re-audit')},
-  escalate(id){const t=ticket(id);t.status='Escalated';t.escalatedAt=Date.now();t.escalatedBy=user.name;tlog(t,'Escalated');flashId=id;save();render();toast(`${id} escalated · set a fix date within 7 days`)},
+  escalate(id){const t=ticket(id);t.status='Escalated';t.escalatedAt=Date.now();t.escalatedBy=user.name;tlog(t,'Escalated');save();
+    // go straight on to the fix date: the card opens its form in place
+    const prev=editingT;editingT=id;if(prev&&prev!==id)swapSelm(prev,false);
+    swapCard(id,true)?.querySelector('.tk-form')?.classList.add('enter');toast(`${id} escalated · set a fix date within 7 days`)},
   saveT(id,quiet){if(!mine(ticket(id)))return toast(`Only ${ticket(id).escalatedBy} can update ${id}`);const t=ticket(id),fix=fromInput($(`#fix-${id}`).value),note=$(`#note-${id}`).value.trim(),before=S.logs.length;
     if((fix?toInput(fix):'')!==(t.fixDate?toInput(t.fixDate):'')){tlog(t,t.fixDate?'Fix date changed':'Fix date set',`${week(t.fixDate)} → ${week(fix)}${fix?` (${fmtD(fix)})`:''}`);t.fixDate=fix}
     if(note){t.notes.push({ts:Date.now(),by:user.name,text:note});tlog(t,'Note added',note)}
@@ -569,6 +572,9 @@ document.addEventListener('submit',e=>{
 S=load(); if(!S||!S.seq)fresh();
 // older data stored pricing as free text; keep it only if it reads as a number
 [...S.courses,...S.audits].forEach(x=>{if(typeof x.price==='string'){const p=toPrice(x.price);x.price=Number.isNaN(p)?null:p}});
+// older data only recorded passed audits as "last audited"; take the latest audit of any result
+S.courses.forEach(c=>{const a=S.audits.filter(x=>x.courseId===c.id).sort((x,y)=>y.date-x.date)[0];
+  if(a&&(!c.lastAudited||a.date>c.lastAudited)){c.lastAudited=a.date;c.lastAuditor=a.auditor}});
 // an unfinished audit form does not survive a reload, so release its lock
 S.courses.forEach(c=>{if(c.lockedBy){c.lockedBy=null;c.lockedAt=null;if(!openOf(c.id).length)c.auditorStatus='Pending'}});
 $('#userSel').innerHTML=USERS.map(u=>`<option value="${u.id}">${u.name} · ${u.role}</option>`).join('');
