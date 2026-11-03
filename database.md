@@ -22,6 +22,7 @@ erDiagram
   COURSES ||--o{ ACTIVITY_LOGS : logs
   USERS ||--o{ ACTIVITY_LOGS : "acts in"
   TICKETS |o--o{ ACTIVITY_LOGS : "records of"
+  AUDITS |o--o{ ACTIVITY_LOGS : "edits of"
 
   USERS {
     int Id PK
@@ -103,6 +104,7 @@ erDiagram
     int ActorId FK
     int CourseId FK
     int TicketId FK
+    int AuditId FK
     string Action
     string Detail
   }
@@ -177,7 +179,8 @@ erDiagram
 7. **Audit 记下当时的 pricing 和 audience**（`PriceSnapshot`、`AudienceSnapshot`），这样课程之后被修改，旧的 audit 还看得到当时的值。
 8. **AUDITS 只在提交时才写入。** 打开 audit 表单只是锁定课程（`LockedById`、`LockedAt`），中途放弃的话不会留下任何 audit 记录，课程状态也不变。
 9. **下架的课程不删除。** `Health = Discontinued` 加上 `DiscontinuedAt / ById / Reason`，资料和历史都保留，可以 restore。只有从来没 audit 过的课程才真的删除（`DELETE`）。
-10. **Cancel 和 Discontinue 是不同层级。** Cancel 只关一张 ticket（`ClosedAs = Cancelled`）；Discontinue 是整门课下架。
+10. **Criteria 改了要留下痕迹。** Auditor 用 Edit criteria 改答案时，`AUDIT_ANSWERS` 直接更新成新的答案，同时在 `ACTIVITY_LOGS` 写一笔 `Action = Criteria updated`、`AuditId` 指向那次 audit、`Detail` 写 "Launch URL works: No → Yes"。这样画面可以在那次 audit 下面列出修改记录，也能倒推出最原本的答案。
+11. **Cancel 和 Discontinue 是不同层级。** Cancel 只关一张 ticket（`ClosedAs = Cancelled`）；Discontinue 是整门课下架。
 
 ## 规则（服务器端要检查）
 
