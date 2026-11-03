@@ -13,6 +13,7 @@ erDiagram
   CRITERIA ||--o{ AUDIT_ANSWERS : answers
   AUDITS ||--o{ TICKETS : raises
   COURSES ||--o{ TICKETS : has
+  USERS ||--o{ TICKETS : creates
   USERS |o--o{ TICKETS : escalates
   USERS |o--o{ TICKETS : "approves close"
   USERS |o--o{ COURSES : "is auditing"
@@ -82,6 +83,7 @@ erDiagram
     string Detail
     string Status
     datetime CreatedAt
+    int CreatedById FK
     int EscalatedById FK
     datetime EscalatedAt
     datetime FixDate
@@ -189,7 +191,10 @@ erDiagram
 - 还有 ticket 没关时，这次 audit 至少要留一个 `No`。
 - 全部 ticket 关闭后，自动建一次 re-verification audit（`IsReverification = true`），答案全部是 `Yes`，原本 `N/A` 的保持 `N/A`。
 - SLA：`Status = Escalated`、`FixDate` 是空的、而且 `EscalatedAt` 超过 7 天，就算超时。
-- 一门课同一时间只能有一个人 audit（`LockedById`）；锁太久没提交（例如超过一天）要自动解除。
+- 一门课同一时间只能有一个人 audit（`LockedById`）；中途离开或取消就放弃这次 audit、解除锁定，不留记录；锁太久没提交（例如超过一天）也要自动解除。
+- 这一轮还有 open ticket 时，Auditor 可以补开 ticket：`AuditId` 是这一轮的 audit，`CreatedById` 是补开的人，`ACTIVITY_LOGS` 记 `Added after audit`。
+- Ticket 还是 `New`（SELM 还没 escalate）时，Auditor 可以改 Category 和 Detail（记 `Edited by auditor`），或直接删除；删除会在 `ACTIVITY_LOGS` 留一笔 `Ticket removed`，`AuditId` 指向那一轮。这一轮最后一张 open ticket 不能删。
+- 所有动作都要在服务器端、用**当下**的状态再检查一次（例如 `DELETE ... WHERE Status = 'New'`，或 EF Core 的 `RowVersion`），避免画面是旧的、别人刚好已经改了状态。
 - Re-audit 时课程保持 `Healthy`，直到提交结果；re-audit 要有 `No`，或有答案改变（例如 Yes → N/A）才能提交；完全没变就取消，不留记录。有 `No` 提交后变成 `Unhealthy`，只改成 N/A 的话保持 `Healthy`。
 - 只有 escalate 的 SELM（`EscalatedById`）可以更新、Resolve 或 Cancel 那张 ticket；只有 Auditor 可以 Approve 或 Reject。
 - Ticket 填了 `FixDate` 就从 `Escalated` 变成 `In Progress`。

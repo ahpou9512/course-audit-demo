@@ -118,6 +118,7 @@ Table Tickets {
   Detail varchar [not null]
   Status TicketStatus [not null, default: 'New']
   CreatedAt datetime [not null]
+  CreatedById int [not null, ref: > Users.Id, note: 'auditor who opened it (at the audit or added later)']
   EscalatedById int [ref: > Users.Id, note: 'the SELM who owns the ticket']
   EscalatedAt datetime
   FixDate date
