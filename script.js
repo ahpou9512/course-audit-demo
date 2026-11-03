@@ -45,7 +45,7 @@ const readyToVerify=c=>{const o=openOf(c.id);return o.length>0&&o.every(t=>t.sta
 
 function stage(c){
   if(c.health==='Discontinued')return 'disc';
-  if(c.auditorStatus==='Pending'||c.lockedBy)return 'audit';
+  if(c.auditorStatus==='Pending'||c.lockedBy&&c.auditorStatus!=='Completed')return 'audit';
   if(openOf(c.id).length)return readyToVerify(c)?'verify':'issues';
   return 'healthy';
 }
@@ -93,7 +93,10 @@ function render(){
   rowAnim=false;flashId=null;
   if(animTree)setTimeout(()=>$('#tree')?.classList.remove('anim'),1600);
 }
-function go(name,id){view={name,id};editingT=null;enterAnim=true;rowAnim=true;render();window.scrollTo(0,0)}
+function go(name,id){
+  // leaving the page abandons an unfinished re-audit, so the course stays exactly as it was
+  if(draft?.re&&!(name==='course'&&id===draft.courseId)){const c=course(draft.courseId);if(c){c.lockedBy=null;c.lockedAt=null}draft=null;save()}
+  view={name,id};editingT=null;enterAnim=true;rowAnim=true;render();window.scrollTo(0,0)}
 
 /* ---------- courses list ---------- */
 function vCourses(){
@@ -177,9 +180,9 @@ function vCourse(){
   const st=stage(c), open=openOf(c.id), closed=ticketsOf(c.id).filter(t=>t.status===CLOSED);
   const runs=S.audits.filter(a=>a.courseId===c.id).sort((a,b)=>b.date-a.date);
   let btn='';
-  if(st==='audit'&&isAud()&&!c.lockedBy)btn=`<button class="btn primary" data-a="startAudit" data-id="${c.id}">Start audit</button>`;
-  else if(st==='audit'&&c.lockedBy&&c.lockedBy!==user.name)btn=`<span class="muted small">🔒 Being audited by ${esc(c.lockedBy)}</span>`;
-  else if(st==='healthy'&&(isAud()||isOwner()))btn=`<button class="btn" data-a="reaudit" data-id="${c.id}">${isAud()?'Re-audit':'Queue re-audit'}</button>`;
+  if(c.lockedBy&&c.lockedBy!==user.name)btn=`<span class="muted small">🔒 Being audited by ${esc(c.lockedBy)}</span>`;
+  else if(st==='audit'&&isAud()&&!c.lockedBy)btn=`<button class="btn primary" data-a="startAudit" data-id="${c.id}">Start audit</button>`;
+  else if(st==='healthy'&&!c.lockedBy&&(isAud()||isOwner()))btn=`<button class="btn" data-a="reaudit" data-id="${c.id}">${isAud()?'Re-audit':'Queue re-audit'}</button>`;
   else if(st==='audit'&&!isAud())btn=`<span class="muted small">Waiting for an auditor</span>`;
   const stats=`<div class="stats"><span>Audits <b>${runs.length}</b></span><span>Last audited <b>${fmtD(c.lastAudited)}</b>${c.lastAudited?` (${daysSince(c.lastAudited)}d ago)`:''}</span>
       <span>By <b>${esc(c.lastAuditor||'—')}</b></span><span id="priceBox">${priceView(c)}</span><span id="audBox">${audView(c)}</span></div>`;
@@ -211,8 +214,10 @@ const canPrice=()=>isAud()||isSelm();
 // pricing is stored as a number (null = not filled in); '' → null, anything that isn't a non-negative number → NaN
 const toPrice=v=>{v=String(v??'').trim();if(!v)return null;const n=Number(v);return Number.isFinite(n)&&n>=0?Math.round(n*100)/100:NaN};
 const fmtPrice=p=>p==null?'—':Number(p).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-const priceView=c=>`Pricing <b>${fmtPrice(c.price)}</b>${canPrice()&&c.health!=='Discontinued'?` <button class="link small" data-a="editPrice" data-id="${c.id}">Edit</button>`:''}`;
-const audView=c=>`Audience <b>${esc(c.audience||'—')}</b>${canPrice()&&c.health!=='Discontinued'?` <button class="link small" data-a="editAud" data-id="${c.id}">Edit</button>`:''}`;
+// a Healthy course has passed its audit, so its pricing and audience change only through a re-audit
+const canEditInfo=c=>canPrice()&&c.health!=='Healthy'&&c.health!=='Discontinued';
+const priceView=c=>`Pricing <b>${fmtPrice(c.price)}</b>${canEditInfo(c)?` <button class="link small" data-a="editPrice" data-id="${c.id}">Edit</button>`:''}`;
+const audView=c=>`Audience <b>${esc(c.audience||'—')}</b>${canEditInfo(c)?` <button class="link small" data-a="editAud" data-id="${c.id}">Edit</button>`:''}`;
 // dashboard breakdown cards can be folded away; the choice is remembered per browser
 const FOLD_KEY='course-audit-fold';
 let fold=(()=>{try{return JSON.parse(localStorage.getItem(FOLD_KEY))||{}}catch(e){return {}}})();
