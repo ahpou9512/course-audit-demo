@@ -30,7 +30,7 @@ erDiagram
     string Code UK
     string Name
     string Type
-    string DoceboPrice
+    decimal DoceboPrice
     string Health
     int CurrentAuditId FK
     datetime CreatedAt
@@ -53,7 +53,7 @@ erDiagram
     datetime AuditedAt
     string Result
     bool IsReverification
-    string PriceSnapshot
+    decimal PriceSnapshot
     string AudienceSnapshot
     string Note
   }
@@ -143,7 +143,8 @@ erDiagram
 3. **算得出来的不存。** demo 的 `auditCount`、`lastAudited`、`lastAuditor` 可以从 `AUDITS` 算出来，存了反而可能对不上。
 4. **Criteria 是数据，不是代码。** 以后要加第 9 条，或改哪几条可以 N/A，只要改 `CRITERIA` 表。
 5. **Ticket 的拥有者是 `EscalatedById`。** 只有 escalate 的那个 SELM 可以更新这张 ticket，服务器端要检查这一点。
-6. **Audit 记下当时的 pricing 和 audience**（`PriceSnapshot`、`AudienceSnapshot`），这样课程之后被修改，旧的 audit 还看得到当时的值。
+6. **Pricing 用 `decimal(10,2)`，不用文字。** 文字可以输入任何东西（例如 `fdafasd`），也不能计算、比较或正确排序；金额也不要用 `float`，会有小数误差。空的（null）代表还没填。
+7. **Audit 记下当时的 pricing 和 audience**（`PriceSnapshot`、`AudienceSnapshot`），这样课程之后被修改，旧的 audit 还看得到当时的值。
 
 ## 规则（服务器端要检查）
 

@@ -17,9 +17,9 @@ const OLD_NAMES={'Alex Tan':'Rick','Priya Nair':'Calvin','Sam Wong':'Gary','Mei 
 const PV_RES='Pending Verification - Resolved', PV_DIS='Pending Verification - Discontinued', CLOSED='Closed / Archived';
 const WORKING=['Escalated','In Progress','Retest Failed'];
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const STAGES=[['all','All'],['audit','To audit'],['issues','With SELM'],['verify','Ready to check'],['healthy','Healthy'],['disc','Discontinued']];
+const STAGES=[['all','All'],['audit','To audit'],['issues','Unhealthy'],['verify','Ready to check'],['healthy','Healthy'],['disc','Discontinued']];
 
-let S, view={name:'dashboard'}, user=USERS[0], filter='all', myF=false, catFilter='', statusF='', auditedF='', openRecs=new Set(), rejecting=null, search='', histQ='', rptFrom, rptTo, draft=null;
+let S, view={name:'dashboard'}, user=USERS[0], filter='all', myF=false, catFilter='', tkF='', auditedF='', openRecs=new Set(), rejecting=null, search='', histQ='', rptFrom, rptTo, draft=null;
 
 /* ---------- helpers ---------- */
 const $=s=>document.querySelector(s);
@@ -68,7 +68,7 @@ function tone(s){
   return ({'Healthy':'t-ok','Passed':'t-ok','Completed':'t-ok',[CLOSED]:'t-gray',
     'Unhealthy':'t-bad','Failed':'t-bad','Retest Failed':'t-bad',
     'Pending Audit':'t-warn','Pending':'t-warn','New':'t-warn',
-    'Escalated':'t-info','In Progress':'t-acc','Ready to check':'t-info',[PV_RES]:'t-info',[PV_DIS]:'t-info','Discontinued':'t-gray'})[s]||'t-gray';
+    'Escalated':'t-info','In Progress':'t-acc','Ready to check':'t-pv',[PV_RES]:'t-pv',[PV_DIS]:'t-pv','Discontinued':'t-gray'})[s]||'t-gray';
 }
 const pill=s=>`<span class="pill ${tone(s)}">${esc(s)}</span>`;
 const healthLabel=c=>stage(c)==='verify'?'Ready to check':c.health;
@@ -81,16 +81,7 @@ function load(){try{let v=localStorage.getItem(KEY);if(!v)return null;
 function fresh(){S={courses:[],audits:[],tickets:[],logs:[],seq:{t:1001,a:1,c:1,l:1}};save()}
 
 /* ---------- shell ---------- */
-let animTree=false, animatedFor=null, enterAnim=true, rowAnim=true, flashId=null;
-function drawLines(){
-  const tr=$('#tree'),svg=$('#treeLines');if(!tr||!svg||getComputedStyle(svg).display==='none')return;
-  const root=tr.querySelector('.tree-root'),kids=tr.querySelector('.tree-kids');
-  const x1=root.offsetLeft+root.offsetWidth, y1=root.offsetTop+root.offsetHeight/2, x2=kids.offsetLeft;
-  svg.innerHTML=[...kids.children].map((k,i)=>{const y2=kids.offsetTop+k.offsetTop+26, mx=(x1+x2)/2;
-    return `<path d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" style="--i:${i}"/><circle cx="${x2}" cy="${y2}" r="4" style="--i:${i}"/>`}).join('');
-  svg.querySelectorAll('path').forEach(p=>p.style.setProperty('--len',p.getTotalLength()));
-}
-window.addEventListener('resize',drawLines);
+let animTree=false, animatedFor=null, enterAnim=true, rowAnim=true, flashId=null, editingT=null; // editingT: ticket whose SELM form is open
 function render(){
   if(view.name==='course'){animTree=animatedFor!==view.id;animatedFor=view.id}else{animTree=false;animatedFor=null}
   const cur=view.name==='course'?'courses':view.name;
@@ -98,12 +89,11 @@ function render(){
     .map(([k,l])=>`<button class="tab" data-a="go" data-id="${k}" aria-current="${cur===k}">${l}</button>`).join('');
   $('#view').innerHTML=({courses:vCourses,course:vCourse,dashboard:vDash,history:vHistory})[view.name]();
   if(view.name==='course'&&draft)renderIssues();
-  drawLines();
   if(enterAnim){const v=$('#view');v.classList.remove('enter');void v.offsetWidth;v.classList.add('enter');enterAnim=false}
   rowAnim=false;flashId=null;
   if(animTree)setTimeout(()=>$('#tree')?.classList.remove('anim'),1600);
 }
-function go(name,id){view={name,id};enterAnim=true;rowAnim=true;render();window.scrollTo(0,0)}
+function go(name,id){view={name,id};editingT=null;enterAnim=true;rowAnim=true;render();window.scrollTo(0,0)}
 
 /* ---------- courses list ---------- */
 function vCourses(){
@@ -114,16 +104,23 @@ function vCourses(){
   <div class="toolbar"><div class="chips-bar">${STAGES.map(([k,l])=>`<button class="fchip" data-a="filter" data-id="${k}" aria-pressed="${filter===k}">${l} <b>${counts[k]}</b></button>`).join('')}
     ${isSelm()?`<button class="fchip mine" data-a="toggleMine" aria-pressed="${myF}">My tickets <b>${myN}</b></button>`:''}</div>
     </div>
+  <div class="tk-legend" role="group" aria-label="Highlight tickets"><span class="lbl">Highlight tickets</span>${TK_OPTS.map(([v,l])=>`<button class="lchip" data-a="tkHl" data-id="${v}" aria-pressed="${tkF===v}">${v==='closed'?'<span class="dot chk">✓</span>':`<span class="dot ${tone(v==='verify'?PV_RES:v)}"></span>`}${l}</button>`).join('')}</div>
   <div class="tbl-wrap"><table><thead><tr><th>Course</th><th>Status</th><th>Issue categories</th><th>Last audited</th><th>Next step</th></tr>
     <tr class="frow"><th><input type="search" id="search" placeholder="Search code or name" value="${esc(search)}" aria-label="Search courses"></th>
-    <th>${fsel('statusF',statusF,'All statuses',STATUS_OPTS.map(x=>[x,x]),'Filter by status')}</th>
+    <th>${fsel('statusF',filter==='all'?'':filter,'All statuses',STAGES.slice(1),'Filter by status')}</th>
     <th>${fsel('catFilter',catFilter,'All categories',CATS.map(x=>[x,x]),'Filter by issue category')}</th>
     <th>${fsel('auditedF',auditedF,'Any time',AUDITED_OPTS,'Filter by last audited')}</th>
     <th><button class="link small" data-a="clearF">Clear filters</button></th></tr></thead><tbody id="courseRows">${courseRows()}
   </tbody></table></div>`;
 }
 
-const STATUS_OPTS=['Pending Audit','Unhealthy','Ready to check','Healthy','Discontinued'];
+const TK_OPTS=[['New','New'],['Escalated','Escalated'],['In Progress','In Progress'],['Retest Failed','Retest Failed'],['verify','Waiting for verification'],['closed','Closed']];
+const tkMatch=t=>tkF==='verify'?t.status===PV_RES||t.status===PV_DIS:tkF==='closed'?t.status===CLOSED:t.status===tkF;
+// category and My tickets narrow the course list; the ticket status filter only highlights, so no course is hidden by it
+const tkKeep=t=>(!catFilter||t.category===catFilter)&&(!myF||!isSelm()||t.escalatedBy===user.name);
+const tkHit=t=>tkKeep(t)&&(!tkF||tkMatch(t));
+// while the cycle is still open, tickets already approved stay listed with a check mark
+const shownOf=c=>openOf(c.id).length?ticketsOf(c.id).filter(t=>t.status!==CLOSED||t.auditId===c.cycleAuditId):[];
 const AUDITED_OPTS=[['never','Never audited'],['7','Last 7 days'],['30','Last 30 days'],['old','Over 30 days ago']];
 const fsel=(id,cur,all,opts,label)=>`<select id="${id}" class="${cur?'on':''}" aria-label="${label}"><option value="">${all}</option>${opts.map(([v,l])=>`<option value="${esc(v)}"${cur===v?' selected':''}>${esc(l)}</option>`).join('')}</select>`;
 function auditedOk(c){
@@ -137,22 +134,20 @@ function auditedOk(c){
 function refreshRows(){
   document.querySelectorAll('.fchip[data-a=filter]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.id===filter));
   $('.fchip.mine')?.setAttribute('aria-pressed',myF);
+  document.querySelectorAll('.lchip').forEach(b=>b.setAttribute('aria-pressed',b.dataset.id===tkF));
+  const sf=$('#statusF');if(sf){sf.value=filter==='all'?'':filter;sf.classList.toggle('on',filter!=='all')}
   $('#courseRows').innerHTML=courseRows();
 }
 function courseRows(){
   const q=search.trim().toLowerCase();
   const list=S.courses.filter(c=>(filter==='all'||stage(c)===filter)&&(!q||(c.code+' '+c.name).toLowerCase().includes(q))
-      &&(!catFilter||openOf(c.id).some(t=>t.category===catFilter))&&(!statusF||healthLabel(c)===statusF)&&auditedOk(c)
-      // SELM's own work: courses with an open ticket they escalated
-      &&(!myF||!isSelm()||openOf(c.id).some(t=>t.escalatedBy===user.name)))
+      &&auditedOk(c)&&(!(catFilter||myF&&isSelm())||shownOf(c).some(tkKeep)))
     .sort((a,b)=>(nextStep(b)[1]-nextStep(a)[1])||b.createdAt-a.createdAt);
-  return `  ${list.length?list.map((c,i)=>{const [txt,me]=nextStep(c);const o=openOf(c.id);
-    // while the cycle is still open, tickets already approved stay listed with a check mark
-    const shown=o.length?ticketsOf(c.id).filter(t=>t.status!==CLOSED||t.auditId===c.cycleAuditId):[];return `<tr class="click${rowAnim?' row-in':''}${c.id===flashId?' flash':''}" style="--i:${Math.min(i,12)}" data-a="open" data-id="${c.id}" tabindex="0">
+  return `  ${list.length?list.map((c,i)=>{const [txt,me]=nextStep(c), shown=shownOf(c), fade=catFilter||tkF||myF&&isSelm();return `<tr class="click${rowAnim?' row-in':''}${c.id===flashId?' flash':''}" style="--i:${Math.min(i,12)}" data-a="open" data-id="${c.id}" tabindex="0">
     <td><div class="cname"><span class="mono">${esc(c.code)}</span><b>${esc(c.name)}</b></div></td>
     <td>${pill(healthLabel(c))}</td>
     <td>${shown.length?`<div class="catlist">${shown.map(t=>{const done=t.status===CLOSED,dis=t.closedAs==='Discontinued';
-      return `<div class="ci${done?' closed':''}${myF&&isSelm()&&t.escalatedBy!==user.name?' other':''}" title="${t.id}">${done?`<span class="dot chk${dis?' dis':''}">✓</span>`:`<span class="dot ${tone(t.status)}"></span>`}<span class="cn">${esc(t.category)}</span>
+      return `<div class="ci${done?' closed':''}${fade&&!tkHit(t)?' other':''}" title="${t.id}">${done?`<span class="dot chk${dis?' dis':''}">✓</span>`:`<span class="dot ${tone(t.status)}"></span>`}<span class="cn">${esc(t.category)}</span>
       ${done?`<span class="cs ${dis?'':'ok'}">${dis?'Discontinued':'Approved'}</span>`:`<span class="cs${isOverdue(t)?' late':''}">${esc(shortStatus(t.status))}${isOverdue(t)?` · ${daysSince(t.escalatedAt)}d no fix date`:''}</span>`}</div>`}).join('')}</div>`:'<span class="muted">—</span>'}</td>
     <td class="mono nowrap">${fmtD(c.lastAudited)}</td>
     <td><span class="next${me?' me':''}">${esc(txt)}</span></td></tr>`}).join('')
@@ -172,20 +167,14 @@ function vCourse(){
   const stats=`<div class="stats"><span>Audits <b>${c.auditCount}</b></span><span>Last audited <b>${fmtD(c.lastAudited)}</b>${c.lastAudited?` (${daysSince(c.lastAudited)}d ago)`:''}</span>
       <span>By <b>${esc(c.lastAuditor||'—')}</b></span><span id="priceBox">${priceView(c)}</span><span id="audBox">${audView(c)}</span></div>`;
   return `<button class="link back" data-a="go" data-id="courses">← All courses</button>
-  ${open.length?'':`<div class="panel"><div class="chead"><div style="display:flex;flex-direction:column;gap:6px">
-      <span class="mono muted">${esc(c.code)} · ${esc(c.type)}</span><h2>${esc(c.name)}</h2>
+  <div class="panel cover"><div class="chead"><div style="display:flex;flex-direction:column;gap:6px">
+      <span class="mono muted">${esc(c.code)} · ${esc(c.type)}${open.length?` · ${open.length} open issue${open.length>1?'s':''}`:''}</span><h2>${esc(c.name)}</h2>
       <div style="display:flex;gap:6px;flex-wrap:wrap">${pill(healthLabel(c))}${st==='audit'&&c.health==='Healthy'?pill('Re-audit queued'):''}</div></div>${btn}</div>
-    ${stats}</div>`}
+    ${stats}</div>
   ${draft&&draft.courseId===c.id&&c.lockedBy===user.name?`<div class="expander open done">${auditForm(c)}</div>`:''}
-  ${open.length?`<div class="panel"><div class="panel-h"><h3>Open tickets (${open.length})</h3></div>${stats}
-    <div class="tree${animTree?' anim':''}" id="tree">
-      <div class="tree-root"><span class="mono muted">${esc(c.code)}</span><b>${esc(c.name)}</b>
-        <div>${pill(healthLabel(c))}</div><span class="muted small">${esc(c.type)} · ${open.length} open issue${open.length>1?'s':''}</span></div>
-      <svg class="tree-lines" id="treeLines" aria-hidden="true"></svg>
-      <div class="tree-kids">${open.map((t,i)=>`<div class="tree-kid" style="--i:${i}">${ticketRow(c,t,st)}</div>`).join('')}</div>
-    </div>
-    ${closed.length?`<details><summary>Closed tickets (${closed.length})</summary><div class="tickets" style="margin-top:8px">${closed.map(t=>ticketRow(c,t,st)).join('')}</div></details>`:''}</div>`
-  :closed.length?`<div class="panel"><details><summary>Closed tickets (${closed.length})</summary><div class="tickets" style="margin-top:8px">${closed.map(t=>ticketRow(c,t,st)).join('')}</div></details></div>`:''}
+  ${open.length||closed.length?`<div class="panel">${open.length?`<div class="panel-h"><h3>Open tickets (${open.length})</h3></div>
+    <div class="tree${animTree?' anim':''}" id="tree"><div class="tree-kids">${open.map((t,i)=>`<div class="tree-kid" style="--i:${i}">${ticketRow(c,t,st)}</div>`).join('')}</div></div>`:''}
+    ${closed.length?`<details><summary>Closed tickets (${closed.length})</summary><div class="tree-kids closed-kids">${closed.map(t=>`<div class="tree-kid">${ticketRow(c,t,st)}</div>`).join('')}</div></details>`:''}</div>`:''}
   <div class="panel"><h3>Audit history</h3>
     ${runs.length?`<div>${runs.map((a,i)=>`<div class="iter"><span class="n">#${runs.length-i}</span><span class="mono">${fmtD(a.date)}</span>
       <div class="body" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${pill(a.result)}<span>${esc(a.auditor)}</span>${a.note?`<span class="muted small">${esc(a.note)}</span>`:''}
@@ -197,7 +186,10 @@ function vCourse(){
 
 // Docebo pricing can be corrected in place by the auditor or SELM; every change is logged
 const canPrice=()=>isAud()||isSelm();
-const priceView=c=>`Pricing <b>${esc(c.price||'—')}</b>${canPrice()?` <button class="link small" data-a="editPrice" data-id="${c.id}">Edit</button>`:''}`;
+// pricing is stored as a number (null = not filled in); '' → null, anything that isn't a non-negative number → NaN
+const toPrice=v=>{v=String(v??'').trim();if(!v)return null;const n=Number(v);return Number.isFinite(n)&&n>=0?Math.round(n*100)/100:NaN};
+const fmtPrice=p=>p==null?'—':Number(p).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+const priceView=c=>`Pricing <b>${fmtPrice(c.price)}</b>${canPrice()?` <button class="link small" data-a="editPrice" data-id="${c.id}">Edit</button>`:''}`;
 const audView=c=>`Audience <b>${esc(c.audience||'—')}</b>${canPrice()?` <button class="link small" data-a="editAud" data-id="${c.id}">Edit</button>`:''}`;
 // dashboard breakdown cards can be folded away; the choice is remembered per browser
 const FOLD_KEY='course-audit-fold';
@@ -213,8 +205,30 @@ function critEditor(a){
 const approveBox=t=>`<div class="tk-approve"><button class="btn approve-big" data-a="approve" data-id="${t.id}"><span>${t.status===PV_DIS?'Approve discontinue':'Approve'}</span></button><button class="btn sm" data-a="startReject" data-id="${t.id}">Reject</button></div>`;
 const rejectBox=t=>`<div class="tk-form"><label class="field grow"><span class="req">Why it is rejected</span><input type="text" id="rej-${t.id}" placeholder="What still fails"></label>
       <div class="tk-btns"><button class="btn sm" data-a="cancelReject">Cancel</button><button class="btn danger sm" data-a="reject" data-id="${t.id}">Send back to SELM</button></div></div>`;
-// card heights changed, so move the tree connectors (without replaying their draw-in animation)
-function relayout(){$('#tree')?.classList.remove('anim');drawLines()}
+// card contents changed, so don't replay the cards' entrance animation
+function relayout(){$('#tree')?.classList.remove('anim')}
+// let a card glide from its old height to its current one
+function glide(el,h0){
+  const h1=el.offsetHeight;if(h0===h1||matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  el.style.overflow='hidden';
+  el.animate([{height:h0+'px'},{height:h1+'px'}],{duration:280,easing:'cubic-bezier(.2,.7,.3,1)'}).onfinish=()=>{el.style.overflow=''};
+}
+// redraw one ticket card in place (no page redraw); returns the new card
+function swapCard(id,flash){
+  const old=document.querySelector(`.tk[data-tid="${id}"]`),t=ticket(id),c=course(t.courseId);if(!old){render();return null}
+  const box=document.createElement('div');flashId=flash?id:null;box.innerHTML=ticketRow(c,t,stage(c));flashId=null;
+  const nu=box.firstElementChild,h0=old.offsetHeight;old.replaceWith(nu);relayout();glide(nu,h0);return nu;
+}
+// opening or closing the SELM form only swaps the bottom of the card, so the records above never redraw
+function swapSelm(id,open){
+  const card=document.querySelector(`.tk[data-tid="${id}"]`),part=card?.querySelector('.tk-act,.tk-form');if(!part)return swapCard(id);
+  const h0=card.offsetHeight;part.outerHTML=open?selmForm(ticket(id)):selmAct(ticket(id));card.querySelector('.tk-act,.tk-form').classList.add('enter');glide(card,h0);return card;
+}
+const selmAct=t=>`<div class="tk-btns tk-act"><button class="btn primary sm" data-a="openT" data-id="${t.id}">Update</button></div>`;
+const selmForm=t=>`<div class="tk-form">
+      <label class="field"><span>Tentative fix date</span><input type="date" id="fix-${t.id}" value="${t.fixDate?toInput(t.fixDate):''}"></label>
+      <label class="field grow"><span>Note</span><input type="text" id="note-${t.id}" placeholder="Progress, owner, or reason to discontinue"></label>
+      <div class="tk-btns"><button class="btn sm" data-a="saveT" data-id="${t.id}">Save</button><button class="btn okb sm" data-a="resolveT" data-id="${t.id}">Resolved</button><button class="btn danger sm" data-a="discT" data-id="${t.id}">Discontinue</button><button class="link small" data-a="cancelT">Cancel</button></div></div>`;
 function ticketRow(c,t,st){
   const pv=t.status===PV_RES||t.status===PV_DIS;
   let note='';
@@ -223,30 +237,30 @@ function ticketRow(c,t,st){
   let side='', below='';
   if(isSelm()&&t.status==='New')side=`<button class="btn primary sm" data-a="escalate" data-id="${t.id}">Escalate</button>`;
   else if(isSelm()&&WORKING.includes(t.status)&&!mine(t))side=`<span class="muted small">Handled by ${esc(t.escalatedBy)}</span>`;
-  else if(isSelm()&&WORKING.includes(t.status))below=`<div class="tk-form">
-      <label class="field"><span>Tentative fix date</span><input type="date" id="fix-${t.id}" value="${t.fixDate?toInput(t.fixDate):''}"></label>
-      <label class="field grow"><span>Note</span><input type="text" id="note-${t.id}" placeholder="Progress, owner, or reason to discontinue"></label>
-      <div class="tk-btns"><button class="btn sm" data-a="saveT" data-id="${t.id}">Save</button><button class="btn okb sm" data-a="resolveT" data-id="${t.id}">Resolved</button><button class="btn danger sm" data-a="discT" data-id="${t.id}">Discontinue</button></div></div>`;
+  else if(isSelm()&&WORKING.includes(t.status))below=editingT===t.id?selmForm(t):selmAct(t);
   else if(isAud()&&pv){
     below=rejecting===t.id?rejectBox(t):approveBox(t);
   }else if(pv)side=`<span class="muted small">Waiting for auditor</span>`;
   const eta=t.status===CLOSED?`Closed ${fmtD(t.closedAt)} · ${t.closedAs}`:t.fixDate?`ETA ${week(t.fixDate)} · ${fmtD(t.fixDate)}`:'ETA TBD';
-  return `<div class="tk${t.id===flashId?' flash':''}"><div class="tk-main">
+  return `<div class="tk${t.id===flashId?' flash':''}" data-tid="${t.id}"><div class="tk-main">
     <div class="tk-top"><span class="mono muted">${t.id}</span><b>${esc(t.category)}</b><span class="st ${tone(t.status)}" title="${esc(t.status)}"><i></i>${esc(shortStatus(t.status))}</span>
       ${isOverdue(t)?`<span class="late">${daysSince(t.escalatedAt)}d no fix date</span>`:''}<span class="tk-eta">${eta}</span></div>
     <div class="tk-desc">${esc(t.detail)}</div>${note}${records(t)}</div>
     ${side?`<div class="tk-side">${side}</div>`:''}${below}</div>`;
 }
 
-// every action on a ticket, newest first; older entries fold away after the first 3
+// every action on a ticket, newest first; older entries fold away after the first 3,
+// and a closed ticket hides its whole record list until asked
 function records(t){
   const recs=S.logs.filter(l=>l.ticketId===t.id).reverse(); // logs are stored oldest first
   recs.push({ts:t.createdAt,actor:'',action:'Ticket created',detail:''});
-  const row=(l,i)=>`<li${i>=3?' class="old"':''}><span class="mono">${fmtDT(l.ts)}</span><b>${esc(l.action)}</b>${l.detail?`<span>${esc(l.detail)}</span>`:''}${l.actor?`<i>${esc(l.actor)}</i>`:''}</li>`;
-  const more=recs.length-3, open=openRecs.has(t.id);
+  const closed=t.status===CLOSED, keep=closed?0:3;
+  const row=(l,i)=>`<li${i>=keep?' class="old"':''}><span class="mono">${fmtDT(l.ts)}</span><b>${esc(l.action)}</b>${l.detail?`<span>${esc(l.detail)}</span>`:''}${l.actor&&l.actor!==recs[i-1]?.actor?`<i>${esc(l.actor)}</i>`:''}</li>`; // name only where the person changes
+  const more=recs.length-keep, open=openRecs.has(t.id);
+  const on=closed?'Hide records':'Show less', off=closed?`Show records (${more})`:`Show ${more} earlier`;
   // one list: older rows unfold under the first 3, and the toggle stays at the bottom
-  return `<div class="recs${open?' open':''}"><div class="recs-h">Records</div><ol>${recs.map(row).join('')}</ol>
-    ${more>0?`<button type="button" class="link small recs-more" data-a="toggleRecs" data-id="${t.id}" data-n="${more}">${open?'Show less':`Show ${more} earlier`}</button>`:''}</div>`;
+  return `<div class="recs${open?' open':''}${closed?' shut':''}"><div class="recs-h">Records</div><ol>${recs.map(row).join('')}</ol>
+    ${more>0?`<button type="button" class="link small recs-more" data-a="toggleRecs" data-id="${t.id}" data-on="${on}" data-off="${off}">${open?on:off}</button>`:''}</div>`;
 }
 function auditForm(c){
   const d=draft;
@@ -254,7 +268,7 @@ function auditForm(c){
   <div class="audit-h"><h3>Audit #${S.audits.filter(a=>a.courseId===c.id).length+1}</h3><button type="button" class="btn sm" data-a="cancelAudit" data-id="${c.id}">Cancel audit</button></div>
   <div class="audit-b">
     <div class="info-fields">
-      <label class="field"><span>Docebo pricing</span><input type="text" id="fPrice" value="${esc(d.price)}"></label>
+      <label class="field"><span>Docebo pricing</span><input type="text" id="fPrice" inputmode="decimal" autocomplete="off" value="${esc(d.price)}"></label>
       <fieldset class="aud"><legend class="req">Catalog audience</legend><div class="aud-opts">${AUDIENCES.map(a=>`<label class="aud-opt"><input type="checkbox" name="fAud" value="${a}"${d.aud.includes(a)?' checked':''}> ${a}</label>`).join('')}</div></fieldset>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="sec-label">Criteria</span><button type="button" class="btn sm" data-a="markAllYes">All Yes</button></div>
@@ -280,7 +294,9 @@ function submitAudit(){
   const left=draft.crit.filter(v=>!v).length;
   if(left)return err(`Answer all criteria (${left} left).`);
   if(!draft.aud.length)return err('Choose at least one catalog audience.');
-  c.price=draft.price.trim();c.audience=draft.aud.join(', ');
+  const price=toPrice(draft.price);
+  if(Number.isNaN(price))return err('Docebo pricing must be a number of 0 or more.');
+  c.price=price;c.audience=draft.aud.join(', ');
   const info={price:c.price,audience:c.audience}, ts=Date.now();
   const started=c.lockedAt?` · started ${fmtDT(c.lockedAt)}`:'';
   if(draft.crit.includes('No')){
@@ -300,7 +316,7 @@ function submitAudit(){
   }
   c.lockedBy=null;c.lockedAt=null;draft=null;save();
   // fill the button, fold the form away, then land on the Courses list with this row highlighted
-  const done=()=>{filter='all';search='';catFilter='';statusF='';auditedF='';flashId=c.id;go('courses');toast(msg)};
+  const done=()=>{filter='all';search='';catFilter='';tkF='';auditedF='';flashId=c.id;go('courses');toast(msg)};
   const b=$('#submitBtn'),x=$('#auditForm')?.parentElement;
   if(!b||matchMedia('(prefers-reduced-motion: reduce)').matches)return done();
   b.disabled=true;b.style.setProperty('--fill',`var(${fill})`);b.classList.add('filling');
@@ -335,11 +351,11 @@ function vDash(){
   return `<div class="head"><h2>Dashboard</h2><button class="btn sm" data-a="reset">Clear all data</button></div>
   <span class="sec-label">Courses</span>
   <div class="metric hero" style="--tone:var(--accent)"><b>${cs.all}</b><span>All courses</span>${foldBtn('courses')}</div>
-  <div class="fold-box${fold.courses?' shut':''}" id="fold-courses"><div class="metrics">${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to check','--info','verify')}${m(cs.audit,'To audit','--warn','audit')}${m(cs.disc,'Discontinued','--gray','disc')}</div></div>
+  <div class="fold-box${fold.courses?' shut':''}" id="fold-courses"><div class="metrics">${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to check','--pv','verify')}${m(cs.audit,'To audit','--warn','audit')}${m(cs.disc,'Discontinued','--gray','disc')}</div></div>
   ${overdue.length?`<div class="alert"><span>⚠</span><div><b>${overdue.length} ticket${overdue.length>1?'s':''} escalated over 7 days with no fix date.</b> SELM and Auditor groups notified: ${overdue.map(t=>`<button class="link" data-a="open" data-id="${t.courseId}">${t.id}</button>`).join(', ')}</div></div>`:''}
   <span class="sec-label">Tickets</span>
-  <div class="metric hero" style="--tone:var(--accent)"><b>${open.length}</b><span>Open tickets</span>${foldBtn('tickets')}</div>
-  <div class="fold-box${fold.tickets?' shut':''}" id="fold-tickets"><div class="metrics">${tm(S.tickets.filter(t=>t.status==='New'||t.status==='Retest Failed').length,'Waiting for SELM','--warn')}${tm(S.tickets.filter(t=>t.status==='Escalated'||t.status==='In Progress').length,'Escalated','--gray')}${tm(S.tickets.filter(t=>t.status===PV_RES||t.status===PV_DIS).length,'Waiting for verification','--info')}${tm(overdue.length,'Over 7-day SLA','--bad')}</div></div>
+  <div class="metric hero" style="--tone:var(--accent)"><b>${open.length}</b><span>Open tickets</span><small class="hero-sla${overdue.length?' bad':''}">${overdue.length} over 7-day SLA</small>${foldBtn('tickets')}</div>
+  <div class="fold-box${fold.tickets?' shut':''}" id="fold-tickets"><div class="metrics">${tm(S.tickets.filter(t=>t.status==='New').length,'New','--warn')}${tm(S.tickets.filter(t=>t.status==='Retest Failed').length,'Sent back','--bad')}${tm(S.tickets.filter(t=>t.status==='Escalated').length,'Escalated','--info')}${tm(S.tickets.filter(t=>t.status==='In Progress').length,'In Progress','--accent')}${tm(S.tickets.filter(t=>t.status===PV_RES||t.status===PV_DIS).length,'Waiting for verification','--pv')}</div></div>
   <div class="grid2">
     <div class="panel"><h3>Open tickets by category</h3><div class="bars">${catCounts.length?catCounts.map(([c,n])=>`<div class="bar"><span>${esc(c)}</span><div class="track"><div class="fill" style="width:${n/maxC*100}%"></div></div><span class="v">${n}</span></div>`).join(''):'<span class="muted">No open tickets</span>'}</div></div>
     <div class="panel"><h3>Fix ETA by week</h3><div class="bars">${bKeys.length?bKeys.map(k=>`<div class="bar"><span class="mono">${k}</span><div class="track"><div class="fill" style="width:${buckets[k].length/maxB*100}%;${k==='TBD'?'background:var(--warn)':''}"></div></div><span class="v">${buckets[k].length}</span></div>`).join(''):'<span class="muted">Nothing scheduled</span>'}</div></div>
@@ -411,16 +427,17 @@ const A={
     const code=$('#nCode').value.trim(),name=$('#nName').value.trim();
     if(!code||!name){$('#nErr').textContent='Course code and course name are required.';return}
     if(S.courses.some(c=>c.code.toLowerCase()===code.toLowerCase())){$('#nErr').textContent=`${code} is already in the masterlist.`;return}
-    const c={id:'C'+S.seq.c++,code,name,type:$('#nType').value,price:'',audience:'',health:'Pending Audit',auditorStatus:'Pending',auditCount:0,lastAudited:null,lastAuditor:null,lockedBy:null,lockedAt:null,cycleAuditId:null,createdAt:Date.now()};
+    const c={id:'C'+S.seq.c++,code,name,type:$('#nType').value,price:null,audience:'',health:'Pending Audit',auditorStatus:'Pending',auditCount:0,lastAudited:null,lastAuditor:null,lockedBy:null,lockedAt:null,cycleAuditId:null,createdAt:Date.now()};
     S.courses.push(c);log({courseId:c.id,action:'Course registered',detail:'Manual entry'});save();closeOv();render();toast(`${code} added`)},
   close:closeOv,
   toggleMine(){myF=!myF;refreshRows()},
-  clearF(){search='';catFilter='';statusF='';auditedF='';filter='all';myF=false;
+  tkHl(id){tkF=tkF===id?'':id;refreshRows()},
+  clearF(){search='';catFilter='';tkF='';auditedF='';filter='all';myF=false;
     $('#search').value='';['statusF','catFilter','auditedF'].forEach(id=>{$('#'+id).value='';$('#'+id).classList.remove('on')});refreshRows()},
   reset(){openModal(`<div class="ov-h"><h3>Clear all data?</h3><button class="x" data-a="close" aria-label="Close">×</button></div><div class="ov-b">All courses, audits, tickets and history in this browser will be removed.</div><div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn danger" data-a="doReset">Clear</button></div>`)},
   doReset(){fresh();draft=null;closeOv();go('courses');toast('All data cleared')},
   startAudit(id){const c=course(id);c.lockedBy=user.name;c.lockedAt=Date.now();c.auditorStatus='In Progress';
-    draft={courseId:id,crit:Array(8).fill(null),price:c.price||'',aud:audList(c.audience),issues:[]};save();
+    draft={courseId:id,crit:Array(8).fill(null),price:c.price??'',aud:audList(c.audience),issues:[]};save();
     // open the form in place instead of re-rendering the page
     const b=document.querySelector('[data-a=startAudit]'),p=b?.closest('.panel');if(!p){render();return}
     b.remove();p.insertAdjacentHTML('afterend',`<div class="expander">${auditForm(c)}</div>`);renderIssues();
@@ -441,14 +458,23 @@ const A={
     <div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="doReaudit" data-id="${c.id}">Queue re-audit</button></div>`)},
   doReaudit(id){closeOv();const c=course(id);c.auditorStatus='Pending';log({courseId:c.id,action:'Re-audit queued',detail:''});save();render();toast('Queued for re-audit')},
   escalate(id){const t=ticket(id);t.status='Escalated';t.escalatedAt=Date.now();t.escalatedBy=user.name;tlog(t,'Escalated');flashId=id;save();render();toast(`${id} escalated · set a fix date within 7 days`)},
-  saveT(id,quiet){if(!mine(ticket(id)))return toast(`Only ${ticket(id).escalatedBy} can update ${id}`);const t=ticket(id),fix=fromInput($(`#fix-${id}`).value),note=$(`#note-${id}`).value.trim();
-    if(fix!==t.fixDate){tlog(t,t.fixDate?'Fix date changed':'Fix date set',`${week(t.fixDate)} → ${week(fix)}${fix?` (${fmtD(fix)})`:''}`);t.fixDate=fix}
+  saveT(id,quiet){if(!mine(ticket(id)))return toast(`Only ${ticket(id).escalatedBy} can update ${id}`);const t=ticket(id),fix=fromInput($(`#fix-${id}`).value),note=$(`#note-${id}`).value.trim(),before=S.logs.length;
+    if((fix?toInput(fix):'')!==(t.fixDate?toInput(t.fixDate):'')){tlog(t,t.fixDate?'Fix date changed':'Fix date set',`${week(t.fixDate)} → ${week(fix)}${fix?` (${fmtD(fix)})`:''}`);t.fixDate=fix}
     if(note){t.notes.push({ts:Date.now(),by:user.name,text:note});tlog(t,'Note added',note)}
     if(t.fixDate&&t.status!=='In Progress'){t.status='In Progress';tlog(t,'Status → In Progress','Fix date saved')}
-    if(!quiet){flashId=id;save();render();toast('Saved')}},
-  resolveT(id){if(!mine(ticket(id)))return toast(`Only ${ticket(id).escalatedBy} can update ${id}`);A.saveT(id,true);const t=ticket(id);t.status=PV_RES;tlog(t,'Marked resolved','Sent for auditor verification');flashId=id;save();render();toast(`${id} sent for verification`)},
+    if(quiet)return;
+    const added=S.logs.length-before, card=document.querySelector(`.tk[data-tid="${id}"]`);
+    const say=(el,txt,cls)=>{el.querySelector('.tk-saved')?.remove();el.querySelector('.tk-btns')?.insertAdjacentHTML('beforeend',`<span class="tk-saved ${cls}">${txt}</span>`)};
+    if(!added){if(card)say(card,'No changes to save','none');return}
+    // close the form; the card comes back with its new record rows lit up and a saved note by Update
+    save();editingT=null;const nu=swapCard(id,true);if(!nu)return toast('Saved');
+    [...nu.querySelectorAll('.recs li')].slice(0,added).forEach(li=>li.classList.add('new'));say(nu,'✓ Saved','ok')},
+  openT(id){const prev=editingT;editingT=id;if(prev&&prev!==id)swapSelm(prev,false);
+    swapSelm(id,true)},
+  cancelT(){const id=editingT;editingT=null;if(id)swapSelm(id,false)},
+  resolveT(id){if(!mine(ticket(id)))return toast(`Only ${ticket(id).escalatedBy} can update ${id}`);A.saveT(id,true);const t=ticket(id);t.status=PV_RES;tlog(t,'Marked resolved','Sent for auditor verification');editingT=null;flashId=id;save();render();toast(`${id} sent for verification`)},
   discT(id){if(!mine(ticket(id)))return toast(`Only ${ticket(id).escalatedBy} can update ${id}`);const note=$(`#note-${id}`).value.trim();if(!note){$(`#note-${id}`).focus();toast('Add a note explaining why');return}
-    const t=ticket(id);t.notes.push({ts:Date.now(),by:user.name,text:note});t.status=PV_DIS;t.justification=note;tlog(t,'Proposed discontinuation',note);flashId=id;save();render();toast(`${id} sent for verification`)},
+    const t=ticket(id);t.notes.push({ts:Date.now(),by:user.name,text:note});t.status=PV_DIS;t.justification=note;tlog(t,'Proposed discontinuation',note);editingT=null;flashId=id;save();render();toast(`${id} sent for verification`)},
   startReject(id){if(rejecting)A.cancelReject();
     const el=document.querySelector(`[data-a=startReject][data-id="${id}"]`)?.closest('.tk-approve');
     rejecting=id;if(!el)return render();el.outerHTML=rejectBox(ticket(id));relayout();$('#rej-'+id)?.focus()},
@@ -477,13 +503,14 @@ const A={
     if(diff.length){a.checklist=next;log({courseId:a.courseId,action:'Criteria updated',detail:diff.join('; ')});save()}
     A.cancelCrit(id);toast(diff.length?`Criteria updated (${diff.length} change${diff.length>1?'s':''})`:'No changes')},
   toggleRecs(id){const b=document.querySelector(`[data-a=toggleRecs][data-id="${id}"]`),open=!openRecs.has(id);
-    open?openRecs.add(id):openRecs.delete(id);b.closest('.recs').classList.toggle('open',open);b.textContent=open?'Show less':`Show ${b.dataset.n} earlier`;relayout()},
-  editPrice(id){const c=course(id);$('#priceBox').innerHTML=`<span class="price-edit">Pricing <input type="text" id="priceIn" value="${esc(c.price||'')}" aria-label="Docebo pricing">
-      <button class="btn primary sm" data-a="savePrice" data-id="${id}">Save</button><button class="btn sm" data-a="cancelPrice" data-id="${id}">Cancel</button></span>`;
+    open?openRecs.add(id):openRecs.delete(id);b.closest('.recs').classList.toggle('open',open);b.closest('.recs').classList.add('reveal');b.textContent=open?b.dataset.on:b.dataset.off;relayout()},
+  editPrice(id){const c=course(id);$('#priceBox').innerHTML=`<span class="price-edit">Pricing <input type="text" id="priceIn" inputmode="decimal" autocomplete="off" value="${c.price??''}" aria-label="Docebo pricing">
+      <button class="btn primary sm" data-a="savePrice" data-id="${id}">Save</button><button class="btn sm" data-a="cancelPrice" data-id="${id}">Cancel</button><span class="err" id="priceErr"></span></span>`;
     const i=$('#priceIn');i.focus();i.select()},
   cancelPrice(id){$('#priceBox').innerHTML=priceView(course(id))},
-  savePrice(id){const c=course(id),v=$('#priceIn').value.trim(),old=c.price||'';
-    if(v!==old){c.price=v;log({courseId:id,action:'Pricing updated',detail:`${old||'—'} → ${v||'—'}`});save();toast('Pricing updated')}
+  savePrice(id){const c=course(id),v=toPrice($('#priceIn').value),old=c.price??null;
+    if(Number.isNaN(v)){$('#priceErr').textContent='Enter a number of 0 or more.';return}
+    if(v!==old){c.price=v;log({courseId:id,action:'Pricing updated',detail:`${fmtPrice(old)} → ${fmtPrice(v)}`});save();toast('Pricing updated')}
     A.cancelPrice(id)},
   editAud(id){const c=course(id),cur=audList(c.audience);
     $('#audBox').innerHTML=`<span class="price-edit aud-edit">Audience ${AUDIENCES.map(a=>`<label class="aud-opt"><input type="checkbox" name="eAud" value="${a}"${cur.includes(a)?' checked':''}> ${a}</label>`).join('')}
@@ -515,8 +542,9 @@ document.addEventListener('change',e=>{
   else if(t.name&&/^e\d$/.test(t.name))t.closest('.crit-row').classList.toggle('no',t.value==='No');
   else if(t.name==='fAud')draft.aud=[...document.querySelectorAll('input[name=fAud]:checked')].map(x=>x.value);
   else if(t.id==='userSel'){user=USERS.find(u=>u.id===t.value);closeOv();render();toast(`Now ${user.name} (${user.role})`)}
-  else if(['catFilter','statusF','auditedF'].includes(t.id)){
-    ({catFilter:v=>catFilter=v,statusF:v=>statusF=v,auditedF:v=>auditedF=v})[t.id](t.value);
+  else if(t.id==='statusF'){filter=t.value||'all';refreshRows()}
+  else if(['catFilter','auditedF'].includes(t.id)){
+    ({catFilter:v=>catFilter=v,auditedF:v=>auditedF=v})[t.id](t.value);
     t.classList.toggle('on',!!t.value);refreshRows()}
   else if(t.id==='rFrom'){rptFrom=fromInput(t.value);render()}
   else if(t.id==='rTo'){rptTo=fromInput(t.value);render()}
@@ -524,6 +552,8 @@ document.addEventListener('change',e=>{
 });
 document.addEventListener('input',e=>{
   const t=e.target;
+  // pricing boxes are plain text boxes that keep only digits and one decimal point (2 places)
+  if(t.id==='fPrice'||t.id==='priceIn'){const v=t.value.replace(/[^\d.]/g,'').replace(/(\..*)\./g,'$1').replace(/(\.\d{2})\d+/,'$1');if(v!==t.value)t.value=v}
   if(t.id?.startsWith('iDesc'))draft.issues[+t.dataset.i].desc=t.value;
   else if(t.id==='fPrice')draft.price=t.value;
   // only refresh the table body so the search box keeps focus, scroll and IME composition
@@ -537,6 +567,8 @@ document.addEventListener('submit',e=>{
 
 /* ---------- boot ---------- */
 S=load(); if(!S||!S.seq)fresh();
+// older data stored pricing as free text; keep it only if it reads as a number
+[...S.courses,...S.audits].forEach(x=>{if(typeof x.price==='string'){const p=toPrice(x.price);x.price=Number.isNaN(p)?null:p}});
 // an unfinished audit form does not survive a reload, so release its lock
 S.courses.forEach(c=>{if(c.lockedBy){c.lockedBy=null;c.lockedAt=null;if(!openOf(c.id).length)c.auditorStatus='Pending'}});
 $('#userSel').innerHTML=USERS.map(u=>`<option value="${u.id}">${u.name} · ${u.role}</option>`).join('');
