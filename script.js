@@ -19,7 +19,7 @@ const WORKING=['Escalated','In Progress','Retest Failed'];
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const STAGES=[['all','All'],['audit','To audit'],['issues','Unhealthy'],['verify','Ready to check'],['healthy','Healthy'],['disc','Discontinued']];
 
-let S, view={name:'dashboard'}, user=USERS[0], filter='all', myF=false, catFilter='', tkF='', auditedF='', openRecs=new Set(), rejecting=null, search='', histQ='', rptFrom, rptTo, draft=null;
+let S, view={name:'dashboard'}, user=USERS[0], filter='all', myF=false, catFilter='', tkF='', auditedF='', openRecs=new Set(), rejecting=null, search='', histQ='', rptFrom, rptTo, draft=null, page=1, rowTotal=0;
 
 /* ---------- helpers ---------- */
 const $=s=>document.querySelector(s);
@@ -116,7 +116,7 @@ function vCourses(){
     <th>${fsel('catFilter',catFilter,'All categories',CATS.map(x=>[x,x]),'Filter by issue category')}</th>
     <th>${fsel('auditedF',auditedF,'Any time',AUDITED_OPTS,'Filter by last audited')}</th>
     <th><button class="link small" data-a="clearF">Clear filters</button></th></tr></thead><tbody id="courseRows">${courseRows()}
-  </tbody></table></div>`;
+  </tbody></table></div><div class="pager" id="pager">${pagerHtml()}</div>`;
 }
 
 const TK_OPTS=[['New','New'],['Escalated','Escalated'],['In Progress','In Progress'],['Retest Failed','Retest Failed'],['verify','Waiting for verification'],['closed','Closed']];
@@ -138,7 +138,8 @@ function auditedOk(c){
   return auditedF==='old'?d>30:d<=+auditedF;
 }
 // filtering only swaps the table rows, so the page itself never redraws
-function refreshRows(){
+function refreshRows(keepPage){
+  if(!keepPage)page=1; // any filter change starts again from the first page
   document.querySelectorAll('.fchip[data-a=filter]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.id===filter));
   $('.fchip.mine')?.setAttribute('aria-pressed',myF);
   document.querySelectorAll('.lchip').forEach(b=>b.setAttribute('aria-pressed',b.dataset.id===tkF));
@@ -147,7 +148,7 @@ function refreshRows(){
   const body=$('#courseRows'),wrap=body.closest('.tbl-wrap'),h0=wrap.offsetHeight,prev={};
   body.querySelectorAll('tr[data-id]').forEach(tr=>{prev[tr.dataset.id]={top:tr.getBoundingClientRect().top,dim:tr.classList.contains('dim'),
     other:new Set([...tr.querySelectorAll('.ci.other')].map(ci=>ci.title))}});
-  body.innerHTML=courseRows();
+  body.innerHTML=courseRows();$('#pager').innerHTML=pagerHtml();
   if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
   glide(wrap,h0); // the table grows or shrinks smoothly instead of jumping
   const ease={duration:320,easing:'cubic-bezier(.2,.7,.3,1)'},op=d=>({opacity:d?.4:1});
@@ -159,12 +160,25 @@ function refreshRows(){
       if(was!==is)[...ci.children].forEach(el=>el.animate([op(was),op(is)],ease))});
   });
 }
+const PAGE=10;
+// "Showing 11–20 of 23" and page buttons; nothing when everything fits on one page
+function pagerHtml(){
+  const pages=Math.ceil(rowTotal/PAGE);if(pages<=1)return '';
+  const from=(page-1)*PAGE+1,to=Math.min(page*PAGE,rowTotal);
+  return `<span class="muted small">Showing ${from}–${to} of ${rowTotal}</span><div class="pg">
+    <button class="btn sm" data-a="pg" data-id="${page-1}"${page===1?' disabled':''}>‹ Prev</button>
+    ${Array.from({length:pages},(_,i)=>i+1).map(n=>`<button class="btn sm${n===page?' on':''}" data-a="pg" data-id="${n}" aria-current="${n===page}">${n}</button>`).join('')}
+    <button class="btn sm" data-a="pg" data-id="${page+1}"${page===pages?' disabled':''}>Next ›</button></div>`;
+}
 function courseRows(){
   const q=search.trim().toLowerCase();
   const list=S.courses.filter(c=>(filter==='all'?stage(c)!=='disc':stage(c)===filter)&&(!q||(c.code+' '+c.name).toLowerCase().includes(q))
       &&auditedOk(c)&&(!(catFilter||myF&&isSelm())||shownOf(c).some(tkKeep)))
     .sort((a,b)=>(tkF?shownOf(b).some(tkHit)-shownOf(a).some(tkHit):0)||(nextStep(b)[1]-nextStep(a)[1])||b.createdAt-a.createdAt);
-  return `  ${list.length?list.map((c,i)=>{const [txt,me]=nextStep(c), shown=shownOf(c), hit=!tkF||shown.some(tkHit), fade=hit&&(catFilter||tkF||myF&&isSelm());return `<tr class="click${hit?'':' dim'}${rowAnim?' row-in':''}${c.id===flashId?' flash':''}" style="--i:${Math.min(i,12)}" data-a="open" data-id="${c.id}" tabindex="0">
+  // one page of PAGE rows at a time
+  rowTotal=list.length;page=Math.min(page,Math.max(1,Math.ceil(list.length/PAGE)));
+  const pageList=list.slice((page-1)*PAGE,page*PAGE);
+  return `  ${list.length?pageList.map((c,i)=>{const [txt,me]=nextStep(c), shown=shownOf(c), hit=!tkF||shown.some(tkHit), fade=hit&&(catFilter||tkF||myF&&isSelm());return `<tr class="click${hit?'':' dim'}${rowAnim?' row-in':''}${c.id===flashId?' flash':''}" style="--i:${Math.min(i,12)}" data-a="open" data-id="${c.id}" tabindex="0">
     <td><div class="cname"><span class="mono">${esc(c.code)}</span><b>${esc(c.name)}</b></div></td>
     <td>${pill(healthLabel(c))}</td>
     <td>${shown.length?`<div class="catlist">${shown.map(t=>{const done=t.status===CLOSED,dis=t.closedAs==='Cancelled'||t.closedAs==='Discontinued';
@@ -242,13 +256,23 @@ const auditInfo=(a,prev)=>{const v=(k,f)=>a[k]===undefined?'—':f(a[k]),moved=k
 function critEditor(a){
   return `<div class="crit-edit"><div class="crit">${CRITERIA.map((l,i)=>`<div class="crit-row${a.checklist[i]==='No'?' no':''}"><span>${l}</span>
     <div class="seg" role="radiogroup" aria-label="${l}">${answers(i).map(v=>`<label><input type="radio" name="e${i}" value="${v}"${a.checklist[i]===v?' checked':''}><span class="${v==='Yes'?'y':v==='No'?'n':'na'}">${v}</span></label>`).join('')}</div></div>`).join('')}</div>
-    <div class="tk-btns"><span class="err" id="ckErr-${a.id}" style="margin-right:auto"></span><button class="btn primary sm" data-a="saveCrit" data-id="${a.id}">Save criteria</button><button type="button" class="btn sm" data-a="cancelCrit" data-id="${a.id}" aria-label="Back without saving" title="Back without saving">←</button></div></div>`;
+    <div class="tk-btns"><span class="err" id="ckErr-${a.id}" style="margin-right:auto"></span><button class="btn primary sm" data-a="saveCrit" data-id="${a.id}">Save criteria</button><button type="button" class="btn sm tk-back" data-a="cancelCrit" data-id="${a.id}" aria-label="Back without saving" title="Back without saving"><span aria-hidden="true">←</span> Back</button></div></div>`;
 }
 const tkFoot=h=>`<div class="tk-btns tk-act">${h}</div>`;
 const waitText=t=>t.status==='New'?'Waiting for SELM':WORKING.includes(t.status)?`With ${esc(t.escalatedBy||'SELM')}`:'Waiting for auditor';
 const approveBox=t=>`<div class="tk-btns tk-act tk-approve"><button class="btn okb sm approve-big" data-a="approve" data-id="${t.id}"><span>${t.status===PV_DIS?'Approve cancel':'Approve'}</span></button><button class="btn sm" data-a="startReject" data-id="${t.id}">Reject</button></div>`;
 const rejectBox=t=>`<div class="tk-form"><label class="field grow"><span class="req">Why it is rejected</span><input type="text" id="rej-${t.id}" placeholder="What still fails"></label>
-      <div class="tk-btns"><button class="btn danger sm" data-a="reject" data-id="${t.id}">Send back to SELM</button><button type="button" class="btn sm tk-back" data-a="cancelReject" aria-label="Back without sending" title="Back without sending">←</button></div></div>`;
+      <div class="tk-btns"><button class="btn danger sm" data-a="reject" data-id="${t.id}">Send back to SELM</button><button type="button" class="btn sm tk-back" data-a="cancelReject" aria-label="Back without sending" title="Back without sending"><span aria-hidden="true">←</span> Back</button></div></div>`;
+// redraw the page, then let each ticket card that is still there slide from where it was to where it is now
+function flipRender(closedPing){
+  const pos={};document.querySelectorAll('.tree-kid .tk[data-tid]').forEach(k=>pos[k.dataset.tid]=k.parentElement.getBoundingClientRect());
+  render();
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  document.querySelectorAll('.tree-kid .tk[data-tid]').forEach(k=>{const p=pos[k.dataset.tid];if(!p)return;
+    const r=k.parentElement.getBoundingClientRect(),dx=p.left-r.left,dy=p.top-r.top;
+    if(dx||dy)k.parentElement.animate([{transform:`translate(${dx}px,${dy}px)`},{transform:'none'}],{duration:340,easing:'cubic-bezier(.2,.7,.3,1)'})});
+  if(closedPing)document.querySelector('.panel details>summary')?.classList.add('ping');
+}
 // card contents changed, so don't replay the cards' entrance animation
 function relayout(){$('#tree')?.classList.remove('anim')}
 // let a card glide from its old height to its current one
@@ -272,7 +296,7 @@ function swapSelm(id,open){
 const audAct=t=>`<div class="tk-btns tk-act tk-aud"><button class="btn sm" data-a="editTk" data-id="${t.id}">Edit</button><button class="btn danger sm" data-a="rmTk" data-id="${t.id}">Remove</button></div>`;
 const audEdit=t=>`<div class="tk-form tk-aud"><label class="field"><span>Category</span><select id="ekCat-${t.id}">${CATS.map(x=>`<option${x===t.category?' selected':''}>${x}</option>`).join('')}</select></label>
       <label class="field grow"><span class="req">What is wrong</span><input type="text" id="ekDesc-${t.id}" value="${esc(t.detail)}"></label>
-      <div class="tk-btns"><button class="btn primary sm" data-a="saveTk" data-id="${t.id}">Save</button><button type="button" class="btn sm tk-back" data-a="cancelTk" data-id="${t.id}" aria-label="Back without saving" title="Back without saving">←</button></div>
+      <div class="tk-btns"><button class="btn primary sm" data-a="saveTk" data-id="${t.id}">Save</button><button type="button" class="btn sm tk-back" data-a="cancelTk" data-id="${t.id}" aria-label="Back without saving" title="Back without saving"><span aria-hidden="true">←</span> Back</button></div>
       <span class="err" id="ekErr-${t.id}"></span></div>`;
 // swap the auditor's part at the bottom of a ticket card, letting the card glide to its new height
 function swapAud(id,html){const card=document.querySelector(`.tk[data-tid="${id}"]`),part=card?.querySelector('.tk-aud');if(!part)return swapCard(id);
@@ -281,7 +305,7 @@ const selmAct=t=>`<div class="tk-btns tk-act"><button class="btn primary sm" dat
 const selmForm=t=>`<div class="tk-form">
       <label class="field"><span>Tentative fix date</span><input type="date" id="fix-${t.id}" value="${t.fixDate?toInput(t.fixDate):''}"></label>
       <label class="field grow"><span>Note</span><input type="text" id="note-${t.id}" placeholder="Progress, owner, or reason to cancel"></label>
-      <div class="tk-btns"><button class="btn sm" data-a="saveT" data-id="${t.id}">Save</button><button class="btn okb sm" data-a="resolveT" data-id="${t.id}">Resolved</button><button class="btn danger sm" data-a="discT" data-id="${t.id}">Cancel</button><button type="button" class="btn sm tk-back" data-a="cancelT" aria-label="Back without saving" title="Back without saving (Esc)">←</button></div></div>`;
+      <div class="tk-btns"><button class="btn sm" data-a="saveT" data-id="${t.id}">Save</button><button class="btn okb sm" data-a="resolveT" data-id="${t.id}">Resolved</button><button class="btn danger sm" data-a="discT" data-id="${t.id}">Cancel</button><button type="button" class="btn sm tk-back" data-a="cancelT" aria-label="Back without saving" title="Back without saving (Esc)"><span aria-hidden="true">←</span> Back</button></div></div>`;
 function ticketRow(c,t,st){
   const pv=t.status===PV_RES||t.status===PV_DIS;
   let note='';
@@ -386,7 +410,7 @@ function submitAudit(){
   }
   c.lockedBy=null;c.lockedAt=null;draft=null;save();
   // fill the button, fold the form away, then land on the Courses list with this row highlighted
-  const done=()=>{filter='all';search='';catFilter='';tkF='';auditedF='';flashId=c.id;go('courses');toast(msg)};
+  const done=()=>{filter='all';search='';catFilter='';tkF='';auditedF='';page=1;flashId=c.id;go('courses');toast(msg)};
   const b=$('#submitBtn'),x=$('#auditForm')?.parentElement;
   if(!b||matchMedia('(prefers-reduced-motion: reduce)').matches)return done();
   b.disabled=true;b.style.setProperty('--fill',`var(${fill})`);b.classList.add('filling');
@@ -420,7 +444,7 @@ function vDash(){
   const inR=S.logs.filter(l=>l.ts>=from&&l.ts<to+DAY), cnt=a=>inR.filter(l=>l.action===a).length;
   return `<div class="head"><h2>Dashboard</h2><button class="btn sm" data-a="reset">Clear all data</button></div>
   <span class="sec-label">Courses</span>
-  <div class="metric hero" style="--tone:var(--accent)"><b>${cs.all}</b><span>All courses</span><button class="link small hero-sla" data-a="goFilter" data-id="disc">${cs.disc} discontinued</button>${foldBtn('courses')}</div>
+  <div class="metric hero" style="--tone:var(--accent)"><b>${cs.all}</b><span>Active courses</span>${foldBtn('courses')}</div>
   <div class="fold-box${fold.courses?' shut':''}" id="fold-courses"><div class="metrics">${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to check','--pv','verify')}${m(cs.audit,'To audit','--warn','audit')}</div></div>
   ${overdue.length?`<div class="alert"><span>⚠</span><div><b>${overdue.length} ticket${overdue.length>1?'s':''} escalated over 7 days with no fix date.</b> SELM and Auditor groups notified: ${overdue.map(t=>`<button class="link" data-a="open" data-id="${t.courseId}">${t.id}</button>`).join(', ')}</div></div>`:''}
   <span class="sec-label">Tickets</span>
@@ -502,6 +526,7 @@ const A={
     S.courses.push(c);log({courseId:c.id,action:'Course registered',detail:'Manual entry'});save();closeOv();render();toast(`${code} added`)},
   close:closeOv,
   toggleMine(){myF=!myF;refreshRows()},
+  pg(n){page=+n;refreshRows(true);$('.tbl-wrap')?.scrollIntoView({behavior:'smooth',block:'nearest'})},
   editTk(id){swapAud(id,audEdit(ticket(id)));$('#ekDesc-'+id)?.focus()},
   cancelTk(id){swapAud(id,audAct(ticket(id)))},
   saveTk(id){const t=ticket(id),cat=$('#ekCat-'+id).value,desc=$('#ekDesc-'+id).value.trim();
@@ -524,7 +549,7 @@ const A={
     document.querySelector(`[data-a=addTk][data-id="${id}"]`).closest('.panel-h').insertAdjacentHTML('afterend',`<div class="tk-add" id="tkAdd">
       <label class="field"><span class="req">Category</span><select id="tkCat"><option value="">Choose…</option>${CATS.map(x=>`<option>${x}</option>`).join('')}</select></label>
       <label class="field grow"><span class="req">What is wrong</span><input type="text" id="tkDesc" placeholder="Page, module or link, and what happens"></label>
-      <div class="tk-btns"><button class="btn primary sm" data-a="doAddTk" data-id="${id}">Add ticket</button><button type="button" class="btn sm" data-a="cancelAddTk" aria-label="Back without adding" title="Back without adding">←</button></div>
+      <div class="tk-btns"><button class="btn primary sm" data-a="doAddTk" data-id="${id}">Add ticket</button><button type="button" class="btn sm tk-back" data-a="cancelAddTk" aria-label="Back without adding" title="Back without adding"><span aria-hidden="true">←</span> Back</button></div>
       <span class="err" id="tkErr"></span></div>`);$('#tkCat').focus()},
   cancelAddTk(){$('#tkAdd')?.remove()},
   doAddTk(id){const c=course(id),cat=$('#tkCat').value,desc=$('#tkDesc').value.trim();
@@ -623,7 +648,11 @@ const A={
     setTimeout(()=>A.doApprove(id),1150)},
   doApprove(id){const t=ticket(id),c=course(t.courseId);
     t.closedAs=t.status===PV_DIS?'Cancelled':'Resolved';t.status=CLOSED;t.closedAt=Date.now();tlog(t,'Ticket closed',`Approved (${t.closedAs})`);
-    const r=closeCycle(c);save();render();toast(`${id} closed`+(r?` · ${r}`:''))},
+    const r=closeCycle(c);save();
+    // the approved card fades out, then the other cards slide into its place and Closed tickets lights up
+    const kid=document.querySelector(`.tree-kid .tk[data-tid="${id}"]`)?.parentElement,done=()=>{flipRender(true);toast(`${id} closed`+(r?` · ${r}`:''))};
+    if(!kid||matchMedia('(prefers-reduced-motion: reduce)').matches)return done();
+    kid.animate([{opacity:1,transform:'none'},{opacity:0,transform:'scale(.95)'}],{duration:260,easing:'ease-in',fill:'forwards'}).onfinish=done},
   reject(id){const t=ticket(id),n=$(`#rej-${id}`).value.trim();if(!n){$(`#rej-${id}`).focus();toast('Add rejection notes first');return}
     const dis=t.status===PV_DIS;rejecting=null;t.status='Retest Failed';t.rejection=n;tlog(t,dis?'Cancellation rejected':'Retest failed',n);flashId=id;save();render();toast(`${id} sent back to SELM`)},
   editCrit(id){const a=S.audits.find(x=>x.id===id),box=$('#ck-'+id);if(!a||!box)return;
@@ -697,7 +726,7 @@ document.addEventListener('input',e=>{
   if(t.id?.startsWith('iDesc'))draft.issues[+t.dataset.i].desc=t.value;
   else if(t.id==='fPrice'){draft.price=t.value;$('#formErr').textContent=''}
   // only refresh the table body so the search box keeps focus, scroll and IME composition
-  else if(t.id==='search'){search=t.value;$('#courseRows').innerHTML=courseRows()}
+  else if(t.id==='search'){search=t.value;page=1;$('#courseRows').innerHTML=courseRows();$('#pager').innerHTML=pagerHtml()}
   else if(t.id==='histQ'){histQ=t.value;$('#histRows').innerHTML=histRows()}
 });
 document.addEventListener('submit',e=>{
