@@ -217,6 +217,8 @@ html{overflow-y:scroll}
 .tk-form .grow{flex:1 1 220px}
 .tk-btns{display:flex;gap:6px;flex-wrap:wrap}
 .tk-act{flex-basis:100%;align-items:center;padding-top:10px;border-top:1px dashed var(--line)}
+.danger-link{color:var(--bad)}
+.tk-aud.enter{animation:formIn .25s ease-out}
 .tk-add{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;padding:12px 14px;border:1px dashed var(--accent);border-radius:12px;background:var(--accent-soft);animation:formIn .25s ease-out}
 .tk-add .grow{flex:1 1 260px}
 .tk-add .err{flex-basis:100%}

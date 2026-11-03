@@ -226,7 +226,7 @@ let fold=(()=>{try{return JSON.parse(localStorage.getItem(FOLD_KEY))||{}}catch(e
 const foldBtn=k=>`<button class="fold-btn" data-a="fold" data-id="${k}" aria-expanded="${!fold[k]}"><span class="fl"><span>Hide details</span><span>Show details</span></span><i>▾</i></button>`;
 // who changed this audit's answers afterwards, newest first; the changes unfold under the summary line
 function editTrail(a){
-  const ed=S.logs.filter(l=>l.action==='Criteria updated'&&l.auditId===a.id).reverse();if(!ed.length)return '';
+  const ed=S.logs.filter(l=>(l.action==='Criteria updated'||l.action==='Ticket removed')&&l.auditId===a.id).reverse();if(!ed.length)return '';
   const open=openEdits.has(a.id),last=ed[0];
   return `<div class="aedit${open?' open':''}" id="ae-${a.id}"><div class="aedit-h">✎ Edited ${ed.length} time${ed.length>1?'s':''} · last by ${esc(last.actor)}, ${fmtDT(last.ts)}
     <button type="button" class="link small" data-a="toggleEdits" data-id="${a.id}">${open?'Hide changes':'Show changes'}</button></div>
@@ -266,6 +266,15 @@ function swapSelm(id,open){
   const card=document.querySelector(`.tk[data-tid="${id}"]`),part=card?.querySelector('.tk-act,.tk-form');if(!part)return swapCard(id);
   const h0=card.offsetHeight;part.outerHTML=open?selmForm(ticket(id)):selmAct(ticket(id));card.querySelector('.tk-act,.tk-form').classList.add('enter');glide(card,h0);return card;
 }
+// while a ticket is still New (no SELM has touched it) the auditor can correct or remove it
+const audAct=t=>`<div class="tk-btns tk-act tk-aud"><button class="link small" data-a="editTk" data-id="${t.id}">Edit</button><span class="muted">·</span><button class="link small danger-link" data-a="rmTk" data-id="${t.id}">Remove</button></div>`;
+const audEdit=t=>`<div class="tk-form tk-aud"><label class="field"><span>Category</span><select id="ekCat-${t.id}">${CATS.map(x=>`<option${x===t.category?' selected':''}>${x}</option>`).join('')}</select></label>
+      <label class="field grow"><span class="req">What is wrong</span><input type="text" id="ekDesc-${t.id}" value="${esc(t.detail)}"></label>
+      <div class="tk-btns"><button class="btn primary sm" data-a="saveTk" data-id="${t.id}">Save</button><button type="button" class="btn sm tk-back" data-a="cancelTk" data-id="${t.id}" aria-label="Back without saving" title="Back without saving">←</button></div>
+      <span class="err" id="ekErr-${t.id}"></span></div>`;
+// swap the auditor's part at the bottom of a ticket card, letting the card glide to its new height
+function swapAud(id,html){const card=document.querySelector(`.tk[data-tid="${id}"]`),part=card?.querySelector('.tk-aud');if(!part)return swapCard(id);
+  const h0=card.offsetHeight;part.outerHTML=html;card.querySelector('.tk-aud').classList.add('enter');glide(card,h0);return card}
 const selmAct=t=>`<div class="tk-btns tk-act"><button class="btn primary sm" data-a="openT" data-id="${t.id}">Update <span class="arr" aria-hidden="true">→</span></button></div>`;
 const selmForm=t=>`<div class="tk-form">
       <label class="field"><span>Tentative fix date</span><input type="date" id="fix-${t.id}" value="${t.fixDate?toInput(t.fixDate):''}"></label>
@@ -280,6 +289,7 @@ function ticketRow(c,t,st){
   if(isSelm()&&t.status==='New')side=`<button class="btn primary sm" data-a="escalate" data-id="${t.id}">Escalate</button>`;
   else if(isSelm()&&WORKING.includes(t.status)&&!mine(t))side=`<span class="muted small">Handled by ${esc(t.escalatedBy)}</span>`;
   else if(isSelm()&&WORKING.includes(t.status))below=editingT===t.id?selmForm(t):selmAct(t);
+  else if(isAud()&&t.status==='New')below=audAct(t);
   else if(isAud()&&pv){
     below=rejecting===t.id?rejectBox(t):approveBox(t);
   }else if(pv)side=`<span class="muted small">Waiting for auditor</span>`;
@@ -483,6 +493,23 @@ const A={
     S.courses.push(c);log({courseId:c.id,action:'Course registered',detail:'Manual entry'});save();closeOv();render();toast(`${code} added`)},
   close:closeOv,
   toggleMine(){myF=!myF;refreshRows()},
+  editTk(id){swapAud(id,audEdit(ticket(id)));$('#ekDesc-'+id)?.focus()},
+  cancelTk(id){swapAud(id,audAct(ticket(id)))},
+  saveTk(id){const t=ticket(id),cat=$('#ekCat-'+id).value,desc=$('#ekDesc-'+id).value.trim();
+    if(!desc){$('#ekErr-'+id).textContent='Describe what is wrong.';return $('#ekDesc-'+id).focus()}
+    const ch=[cat!==t.category?`Category: ${t.category} → ${cat}`:'',desc!==t.detail?'Description updated':''].filter(Boolean);
+    if(!ch.length)return A.cancelTk(id);
+    t.category=cat;t.detail=desc;tlog(t,'Edited by auditor',ch.join('; '));save();
+    const nu=swapCard(id,true);nu?.querySelector('.recs li')?.classList.add('new');toast(`${id} updated`)},
+  rmTk(id){const t=ticket(id);
+    if(openOf(t.courseId).length<=1)return toast(`${id} is the only open ticket, so it can't be removed. Edit it instead, or let the SELM cancel it.`);
+    openModal(`<div class="ov-h"><h3>Remove ${id}?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+      <div class="ov-b"><p style="margin:0">${esc(t.category)} · ${esc(t.detail)}</p><p class="muted small" style="margin:0">It hasn't been escalated yet, so it's deleted. The removal is kept in the audit history.</p></div>
+      <div class="ov-f"><button class="btn" data-a="close">Keep ticket</button><button class="btn danger" data-a="doRmTk" data-id="${id}">Remove ticket</button></div>`)},
+  doRmTk(id){const t=ticket(id);if(!t)return closeOv();
+    S.tickets=S.tickets.filter(x=>x.id!==id);S.logs=S.logs.filter(l=>l.ticketId!==id);
+    log({courseId:t.courseId,auditId:t.auditId,action:'Ticket removed',detail:`Removed ${t.id} (${t.category}): ${t.detail}`});
+    save();closeOv();render();toast(`${id} removed`)},
   // an issue the auditor missed can still join the current round as a new ticket
   addTk(id){if($('#tkAdd'))return $('#tkCat').focus();
     document.querySelector(`[data-a=addTk][data-id="${id}"]`).closest('.panel-h').insertAdjacentHTML('afterend',`<div class="tk-add" id="tkAdd">
