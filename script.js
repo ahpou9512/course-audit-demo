@@ -104,8 +104,9 @@ function vCourses(){
   <div class="toolbar"><div class="chips-bar">${STAGES.map(([k,l])=>`<button class="fchip" data-a="filter" data-id="${k}" aria-pressed="${filter===k}">${l} <b>${counts[k]}</b></button>`).join('')}
     ${isSelm()?`<button class="fchip mine" data-a="toggleMine" aria-pressed="${myF}">My tickets <b>${myN}</b></button>`:''}</div>
     </div>
-  <div class="tk-legend" role="group" aria-label="Highlight tickets"><span class="lbl">Highlight tickets</span>${TK_OPTS.map(([v,l])=>`<button class="lchip" data-a="tkHl" data-id="${v}" aria-pressed="${tkF===v}">${v==='closed'?'<span class="dot chk">✓</span>':`<span class="dot ${tone(v==='verify'?PV_RES:v)}"></span>`}${l}</button>`).join('')}</div>
-  <div class="tbl-wrap"><table><thead><tr><th>Course</th><th>Status</th><th>Issue categories</th><th>Last audited</th><th>Next step</th></tr>
+  <div class="tk-legend" role="group" aria-label="Highlight tickets"><span class="lbl">Highlight tickets</span>${TK_OPTS.map(([v,l])=>`<button class="lchip" data-a="tkHl" data-id="${v}" aria-pressed="${tkF===v}">${v==='closed'?'<span class="dot chk">✓</span>':`<span class="dot ${tone(v==='verify'?PV_RES:v)}"></span>`}${l} <b>${tkCount(v)}</b></button>`).join('')}</div>
+  <div class="tbl-wrap"><table class="courses-tbl"><colgroup><col style="width:24%"><col style="width:14%"><col style="width:32%"><col style="width:14%"><col style="width:16%"></colgroup>
+    <thead><tr><th>Course</th><th>Status</th><th>Issue categories</th><th>Last audited</th><th>Next step</th></tr>
     <tr class="frow"><th><input type="search" id="search" placeholder="Search code or name" value="${esc(search)}" aria-label="Search courses"></th>
     <th>${fsel('statusF',filter==='all'?'':filter,'All statuses',STAGES.slice(1),'Filter by status')}</th>
     <th>${fsel('catFilter',catFilter,'All categories',CATS.map(x=>[x,x]),'Filter by issue category')}</th>
@@ -115,7 +116,9 @@ function vCourses(){
 }
 
 const TK_OPTS=[['New','New'],['Escalated','Escalated'],['In Progress','In Progress'],['Retest Failed','Retest Failed'],['verify','Waiting for verification'],['closed','Closed']];
-const tkMatch=t=>tkF==='verify'?t.status===PV_RES||t.status===PV_DIS:tkF==='closed'?t.status===CLOSED:t.status===tkF;
+const tkIs=(t,v)=>v==='verify'?t.status===PV_RES||t.status===PV_DIS:v==='closed'?t.status===CLOSED:t.status===v;
+const tkMatch=t=>tkIs(t,tkF);
+const tkCount=v=>S.courses.flatMap(shownOf).filter(t=>tkIs(t,v)).length; // tickets the table shows in that state
 // category and My tickets narrow the course list; the ticket status filter only highlights, so no course is hidden by it
 const tkKeep=t=>(!catFilter||t.category===catFilter)&&(!myF||!isSelm()||t.escalatedBy===user.name);
 const tkHit=t=>tkKeep(t)&&(!tkF||tkMatch(t));
@@ -136,14 +139,28 @@ function refreshRows(){
   $('.fchip.mine')?.setAttribute('aria-pressed',myF);
   document.querySelectorAll('.lchip').forEach(b=>b.setAttribute('aria-pressed',b.dataset.id===tkF));
   const sf=$('#statusF');if(sf){sf.value=filter==='all'?'':filter;sf.classList.toggle('on',filter!=='all')}
-  $('#courseRows').innerHTML=courseRows();
+  // remember where each row was and what was faded, then let the new rows slide and fade from there
+  const body=$('#courseRows'),wrap=body.closest('.tbl-wrap'),h0=wrap.offsetHeight,prev={};
+  body.querySelectorAll('tr[data-id]').forEach(tr=>{prev[tr.dataset.id]={top:tr.getBoundingClientRect().top,dim:tr.classList.contains('dim'),
+    other:new Set([...tr.querySelectorAll('.ci.other')].map(ci=>ci.title))}});
+  body.innerHTML=courseRows();
+  if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+  glide(wrap,h0); // the table grows or shrinks smoothly instead of jumping
+  const ease={duration:320,easing:'cubic-bezier(.2,.7,.3,1)'},op=d=>({opacity:d?.4:1});
+  body.querySelectorAll('tr[data-id]').forEach(tr=>{const p=prev[tr.dataset.id];
+    if(!p)return tr.animate([{opacity:0,transform:'translateY(6px)'},{opacity:1,transform:'none'}],ease);
+    const dy=p.top-tr.getBoundingClientRect().top;if(Math.abs(dy)>1)tr.animate([{transform:`translateY(${dy}px)`},{transform:'none'}],ease);
+    const dim=tr.classList.contains('dim');if(dim!==p.dim)tr.querySelectorAll('td').forEach(td=>td.animate([op(p.dim),op(dim)],ease));
+    tr.querySelectorAll('.ci').forEach(ci=>{const was=p.other.has(ci.title),is=ci.classList.contains('other');
+      if(was!==is)[...ci.children].forEach(el=>el.animate([op(was),op(is)],ease))});
+  });
 }
 function courseRows(){
   const q=search.trim().toLowerCase();
   const list=S.courses.filter(c=>(filter==='all'||stage(c)===filter)&&(!q||(c.code+' '+c.name).toLowerCase().includes(q))
       &&auditedOk(c)&&(!(catFilter||myF&&isSelm())||shownOf(c).some(tkKeep)))
-    .sort((a,b)=>(nextStep(b)[1]-nextStep(a)[1])||b.createdAt-a.createdAt);
-  return `  ${list.length?list.map((c,i)=>{const [txt,me]=nextStep(c), shown=shownOf(c), fade=catFilter||tkF||myF&&isSelm();return `<tr class="click${rowAnim?' row-in':''}${c.id===flashId?' flash':''}" style="--i:${Math.min(i,12)}" data-a="open" data-id="${c.id}" tabindex="0">
+    .sort((a,b)=>(tkF?shownOf(b).some(tkHit)-shownOf(a).some(tkHit):0)||(nextStep(b)[1]-nextStep(a)[1])||b.createdAt-a.createdAt);
+  return `  ${list.length?list.map((c,i)=>{const [txt,me]=nextStep(c), shown=shownOf(c), hit=!tkF||shown.some(tkHit), fade=hit&&(catFilter||tkF||myF&&isSelm());return `<tr class="click${hit?'':' dim'}${rowAnim?' row-in':''}${c.id===flashId?' flash':''}" style="--i:${Math.min(i,12)}" data-a="open" data-id="${c.id}" tabindex="0">
     <td><div class="cname"><span class="mono">${esc(c.code)}</span><b>${esc(c.name)}</b></div></td>
     <td>${pill(healthLabel(c))}</td>
     <td>${shown.length?`<div class="catlist">${shown.map(t=>{const done=t.status===CLOSED,dis=t.closedAs==='Discontinued';
