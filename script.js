@@ -195,7 +195,7 @@ function vCourse(){
         :`<button class="btn danger" data-a="discCourse" data-id="${c.id}">Discontinue course</button>`):''}${isAud()&&st==='disc'?`<button class="btn" data-a="restoreCourse" data-id="${c.id}">Restore course</button>`:''}</div></div>
     ${stats}</div>
   ${draft&&draft.courseId===c.id&&c.lockedBy===user.name?`<div class="expander open done">${auditForm(c)}</div>`:''}
-  ${open.length||closed.length?`<div class="panel">${open.length?`<div class="panel-h"><h3>Open tickets (${open.length})</h3></div>
+  ${open.length||closed.length?`<div class="panel">${open.length?`<div class="panel-h"><h3>Open tickets (${open.length})</h3>${isAud()&&c.cycleAuditId?`<button class="btn sm" data-a="addTk" data-id="${c.id}">+ Add ticket</button>`:''}</div>
     <div class="tree${animTree?' anim':''}" id="tree"><div class="tree-kids">${open.map((t,i)=>`<div class="tree-kid" style="--i:${i}">${ticketRow(c,t,st)}</div>`).join('')}</div></div>`:''}
     ${closed.length?`<details><summary>Closed tickets (${closed.length})</summary><div class="tree-kids closed-kids">${closed.map(t=>`<div class="tree-kid">${ticketRow(c,t,st)}</div>`).join('')}</div></details>`:''}</div>`:''}
   <div class="panel"><h3>Audit history</h3>
@@ -483,6 +483,19 @@ const A={
     S.courses.push(c);log({courseId:c.id,action:'Course registered',detail:'Manual entry'});save();closeOv();render();toast(`${code} added`)},
   close:closeOv,
   toggleMine(){myF=!myF;refreshRows()},
+  // an issue the auditor missed can still join the current round as a new ticket
+  addTk(id){if($('#tkAdd'))return $('#tkCat').focus();
+    document.querySelector(`[data-a=addTk][data-id="${id}"]`).closest('.panel-h').insertAdjacentHTML('afterend',`<div class="tk-add" id="tkAdd">
+      <label class="field"><span class="req">Category</span><select id="tkCat"><option value="">Choose…</option>${CATS.map(x=>`<option>${x}</option>`).join('')}</select></label>
+      <label class="field grow"><span class="req">What is wrong</span><input type="text" id="tkDesc" placeholder="Page, module or link, and what happens"></label>
+      <div class="tk-btns"><button class="btn primary sm" data-a="doAddTk" data-id="${id}">Add ticket</button><button type="button" class="btn sm" data-a="cancelAddTk" aria-label="Back without adding" title="Back without adding">←</button></div>
+      <span class="err" id="tkErr"></span></div>`);$('#tkCat').focus()},
+  cancelAddTk(){$('#tkAdd')?.remove()},
+  doAddTk(id){const c=course(id),cat=$('#tkCat').value,desc=$('#tkDesc').value.trim();
+    if(!cat||!desc){$('#tkErr').textContent=!cat?'Choose a category.':'Describe what is wrong.';return (!cat?$('#tkCat'):$('#tkDesc')).focus()}
+    const t={id:'TKT-'+S.seq.t++,courseId:id,auditId:c.cycleAuditId,category:cat,detail:desc,status:'New',createdAt:Date.now(),
+      escalatedAt:null,escalatedBy:null,fixDate:null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};
+    S.tickets.push(t);c.health='Unhealthy';tlog(t,'Added after audit',`${cat} · by the auditor`);flashId=t.id;save();render();toast(`${t.id} added`)},
   toggleEdits(id){const box=$('#ae-'+id),open=!openEdits.has(id);open?openEdits.add(id):openEdits.delete(id);
     box.classList.toggle('open',open);box.querySelector('[data-a=toggleEdits]').textContent=open?'Hide changes':'Show changes'},
   toggleHist(id){const h=$('#hist-'+id),b=document.querySelector(`[data-a=toggleHist][data-id="${id}"]`),open=!openHist.has(id),n=+b.dataset.n;
