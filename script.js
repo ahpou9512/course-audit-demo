@@ -85,10 +85,10 @@ let openHist=new Set(), openEdits=new Set(); // courses whose older audits are u
 let animTree=false, animatedFor=null, enterAnim=true, rowAnim=true, flashId=null, editingT=null; // editingT: ticket whose SELM form is open
 function render(){
   if(view.name==='course'){animTree=animatedFor!==view.id;animatedFor=view.id}else{animTree=false;animatedFor=null}
-  const cur=view.name==='course'?'courses':view.name;
-  $('#tabs').innerHTML=[['dashboard','Dashboard'],['courses','Courses']] // History tab hidden for now; vHistory() is kept
+  const cur=view.name==='course'?'courses':view.name==='auditor'?'team':view.name;
+  $('#tabs').innerHTML=[['dashboard','Dashboard'],['courses','Courses'],['team','Team']] // History tab hidden for now; vHistory() is kept
     .map(([k,l])=>`<button class="tab" data-a="go" data-id="${k}" aria-current="${cur===k}">${l}</button>`).join('');
-  $('#view').innerHTML=({courses:vCourses,course:vCourse,dashboard:vDash,history:vHistory})[view.name]();
+  $('#view').innerHTML=({courses:vCourses,course:vCourse,dashboard:vDash,history:vHistory,team:vTeam,auditor:vAuditor})[view.name]();
   if(view.name==='course'&&draft)renderIssues();
   if(enterAnim){const v=$('#view');v.classList.remove('enter');void v.offsetWidth;v.classList.add('enter');enterAnim=false}
   rowAnim=false;flashId=null;
@@ -479,6 +479,48 @@ function vDash(){
     <div><b>${cnt('Ticket closed')}</b><span>Tickets closed</span></div><div><b>${cnt('Retest failed')+cnt('Cancellation rejected')+cnt('Discontinuation rejected')}</b><span>Sent back</span></div></div></div>`;
 }
 
+/* ---------- team ---------- */
+// what each auditor has done: audits they submitted (re-verifications after fixes counted apart),
+// issues they raised and fixes they approved; the period chips switch between this month and all time
+let teamP='month';
+const REVERIFY='Re-verification after fixes';
+const inPeriod=t=>{if(teamP==='all')return true;const n=new Date();return t>=new Date(n.getFullYear(),n.getMonth(),1).getTime()};
+function auditorStats(name){
+  const all=S.audits.filter(a=>a.auditor===name), runs=all.filter(a=>a.note!==REVERIFY&&inPeriod(a.date));
+  return {audits:runs.length,courses:new Set(runs.map(a=>a.courseId)).size,issues:runs.reduce((n,a)=>n+(a.issues?.length||0),0),
+    verified:S.logs.filter(l=>l.actor===name&&l.action==='Ticket closed'&&inPeriod(l.ts)).length,last:all.length?Math.max(...all.map(a=>a.date)):null};
+}
+const periodChips=()=>`<div class="chips-bar">${[['month','This month'],['all','All time']].map(([k,l])=>`<button class="fchip" data-a="teamP" data-id="${k}" aria-pressed="${teamP===k}">${l}</button>`).join('')}</div>`;
+const avatar=(u,cls)=>`<span class="avatar${cls?' '+cls:''}" aria-hidden="true">${esc(u.name[0])}</span>`;
+function vTeam(){
+  const rows=USERS.filter(u=>u.role==='Auditor').map(u=>({u,s:auditorStats(u.name)})).sort((a,b)=>b.s.audits-a.s.audits||b.s.verified-a.s.verified);
+  const max=Math.max(1,...rows.map(r=>r.s.audits));
+  return `<div class="head"><h2>Team</h2>${periodChips()}</div>
+  <p class="muted small" style="margin:0">Audits each auditor submitted ${teamP==='month'?'this month':'so far'}. Open a card to see their profile.</p>
+  <div class="team">${rows.map(({u,s},i)=>`<button class="tm-card" data-a="openAuditor" data-id="${u.id}">
+    <div class="tm-top">${avatar(u)}<div><b>${esc(u.name)}${u.id===user.id?'<span class="you">You</span>':''}</b><span class="muted small">Last audit ${fmtD(s.last)}</span></div>${s.audits?`<span class="tm-rank">#${i+1}</span>`:''}</div>
+    <div class="tm-big"><b>${s.audits}</b><span>audit${s.audits===1?'':'s'}</span></div>
+    <div class="track"><div class="fill" style="width:${s.audits/max*100}%"></div></div>
+    <div class="tm-kv"><span><b>${s.courses}</b> course${s.courses===1?'':'s'}</span><span><b>${s.issues}</b> issue${s.issues===1?'':'s'} raised</span><span><b>${s.verified}</b> fix${s.verified===1?'':'es'} verified</span></div>
+  </button>`).join('')}</div>`;
+}
+function vAuditor(){
+  const u=USERS.find(x=>x.id===view.id&&x.role==='Auditor')||USERS[0], s=auditorStats(u.name);
+  const all=S.audits.filter(a=>a.auditor===u.name).sort((a,b)=>b.date-a.date);
+  // audits per month over the last six months, oldest first
+  const n=new Date(), per=[...Array(6)].map((_,i)=>{const m=new Date(n.getFullYear(),n.getMonth()-5+i,1),end=new Date(m.getFullYear(),m.getMonth()+1,1).getTime();
+    return [`${MONTHS[m.getMonth()]} ${m.getFullYear()}`,all.filter(a=>a.note!==REVERIFY&&a.date>=m.getTime()&&a.date<end).length]});
+  const max=Math.max(1,...per.map(p=>p[1])), k=(v,l)=>`<div><b>${v}</b><span>${l}</span></div>`;
+  return `<button class="link back" data-a="go" data-id="team">← Team</button>
+  <div class="panel"><div class="tm-top">${avatar(u,'lg')}<div><h2>${esc(u.name)}${u.id===user.id?'<span class="you">You</span>':''}</h2><span class="muted small">${u.role} · last audit ${fmtD(s.last)}</span></div>${periodChips()}</div>
+    <div class="kv">${k(s.audits,'Audits')}${k(s.courses,'Courses audited')}${k(s.issues,'Issues raised')}${k(s.verified,'Fixes verified')}</div></div>
+  <div class="panel"><h3>Audits per month</h3><div class="bars">${per.map(([l,v])=>`<div class="bar"><span class="mono">${l}</span><div class="track"><div class="fill" style="width:${v/max*100}%"></div></div><span class="v">${v}</span></div>`).join('')}</div></div>
+  <div class="panel"><h3>All audits (${all.length})</h3>${all.length?`<div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Course</th><th>Result</th><th>Issues</th></tr></thead><tbody>
+    ${all.map(a=>{const c=course(a.courseId);return `<tr><td class="mono nowrap">${fmtD(a.date)}</td><td>${c?`<button class="link mono" data-a="open" data-id="${c.id}">${esc(c.code)}</button> <span class="muted small">${esc(c.name)}</span>`:'<span class="muted">Deleted course</span>'}</td>
+      <td class="nowrap">${pill(a.result)}${a.note===REVERIFY?' <span class="muted small">Fixes verified</span>':''}</td><td class="mono">${a.issues?.length||'—'}</td></tr>`}).join('')}</tbody></table></div>`
+    :'<span class="muted">No audits yet.</span>'}</div>`;
+}
+
 /* ---------- history ---------- */
 function histRows(){
   const q=histQ.trim().toLowerCase();
@@ -525,6 +567,8 @@ function tlog(t,action,detail){log({courseId:t.courseId,ticketId:t.id,action,det
 const A={
   go(id){go(id)},
   open(id){go('course',id)},
+  openAuditor(id){go('auditor',id)},
+  teamP(id){teamP=id;render()},
   filter(id){filter=id;refreshRows()},
   goFilter(id){filter=id;go('courses')},
   addCourse(){openModal(`<form id="addForm" novalidate style="display:contents"><div class="ov-h"><h3>Add a course</h3><button type="button" class="x" data-a="close" aria-label="Close">×</button></div>
