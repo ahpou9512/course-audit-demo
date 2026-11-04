@@ -3,7 +3,7 @@ const DAY=864e5, KEY='course-audit-demo-v4';
 const CRITERIA=['Search on Dell Learning works','Course Description (PDF) works','Enrollment works','Launch URL works',
   'Course launches on first attempt','No error page','No access denied','Completion recorded'];
 
-const answers=i=>i<3?['Yes','No','N/A']:['Yes','No']; // only H–J can be N/A
+const answers=i=>i<3?['Yes','N/A','No']:['Yes','No']; // only H–J can be N/A
 const AUDIENCES=['Partner','DSP','Customer','Tailored','TD'];
 const CATS=['Content','Edutube','Course Setup','Learning Plan Setup','Pricing','CD PDF','IT issue','Other'];
 const USERS=[
@@ -17,7 +17,7 @@ const OLD_NAMES={'Alex Tan':'Rick','Priya Nair':'Calvin','Sam Wong':'Gary','Mei 
 const PV_RES='Pending Verification - Resolved', PV_DIS='Pending Verification - Discontinued', CLOSED='Closed / Archived';
 const WORKING=['Escalated','In Progress','Retest Failed'];
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const STAGES=[['all','All'],['audit','To audit'],['issues','Unhealthy'],['verify','Ready to check'],['healthy','Healthy'],['disc','Discontinued']];
+const STAGES=[['all','All'],['audit','Pending audit'],['issues','Unhealthy'],['verify','Ready to check'],['healthy','Healthy'],['disc','Discontinued']];
 
 let S, view={name:'dashboard'}, user=USERS[0], filter='all', myF=false, catFilter='', tkF='', auditedF='', openRecs=new Set(), rejecting=null, search='', histQ='', rptFrom, rptTo, draft=null, page=1, rowTotal=0;
 
@@ -303,7 +303,7 @@ const audEdit=t=>`<div class="tk-form tk-aud"><label class="field"><span>Categor
 // swap the auditor's part at the bottom of a ticket card, letting the card glide to its new height
 function swapAud(id,html){const card=document.querySelector(`.tk[data-tid="${id}"]`),part=card?.querySelector('.tk-aud');if(!part)return swapCard(id);
   const h0=card.offsetHeight;part.outerHTML=html;card.querySelector('.tk-aud').classList.add('enter');glide(card,h0);return card}
-const selmAct=t=>`<div class="tk-btns tk-act"><button class="btn primary sm" data-a="openT" data-id="${t.id}">Update <span class="arr" aria-hidden="true">→</span></button></div>`;
+const selmAct=t=>`<div class="tk-btns tk-act"><button class="btn updb sm" data-a="openT" data-id="${t.id}">Update <span class="arr" aria-hidden="true">→</span></button></div>`;
 const selmForm=t=>`<div class="tk-form">
       <label class="field"><span>Tentative fix date</span><input type="date" id="fix-${t.id}" value="${t.fixDate?toInput(t.fixDate):''}"></label>
       <label class="field grow"><span>Note</span><input type="text" id="note-${t.id}" placeholder="Progress, owner, or reason to cancel"></label>
@@ -315,8 +315,9 @@ function ticketRow(c,t,st){
   else if(t.status===PV_DIS&&t.justification)note=`<div class="tk-note"><b>Why cancel:</b> ${esc(t.justification)}</div>`;
   let below='';
   if(t.status===CLOSED)below='';
-  else if(isSelm()&&t.status==='New')below=tkFoot(`<button class="btn primary sm" data-a="escalate" data-id="${t.id}">Escalate</button>`);
+  else if(isSelm()&&t.status==='New')below=tkFoot(`<button class="btn escb sm" data-a="escalate" data-id="${t.id}"><span aria-hidden="true">↑</span> Escalate</button>`);
   else if(isSelm()&&WORKING.includes(t.status)&&mine(t))below=editingT===t.id?selmForm(t):selmAct(t);
+  else if(isSelm()&&pv&&mine(t))below=tkFoot(`<span class="muted small">Waiting for auditor</span><button class="btn sm tk-undo" data-a="takeBack" data-id="${t.id}"><span aria-hidden="true">↶</span> Take back</button>`);
   else if(isAud()&&t.status==='New')below=audAct(t);
   else if(isAud()&&pv)below=rejecting===t.id?rejectBox(t):approveBox(t);
   else below=tkFoot(`<span class="muted small">${waitText(t)}</span>`);
@@ -372,11 +373,13 @@ function renderIssues(){
   const anyNo=draft.crit.includes('No');
   if(anyNo&&!draft.issues.length)draft.issues=[{desc:'',cat:''}];
   document.querySelectorAll('.crit-row').forEach((r,i)=>r.classList.toggle('no',draft.crit[i]==='No'));
-  box.className=anyNo?'issues'+(draft.wasOpen?'':' open-in'):'';draft.wasOpen=anyNo;
-  box.innerHTML=anyNo?`<div class="sec-label" style="color:var(--bad)">Issues · each one becomes a ticket</div>`+draft.issues.map((x,i)=>`<div class="issue"><div class="issue-h"><span>Issue ${i+1}</span>${draft.issues.length>1?`<button type="button" class="btn sm" data-a="rmIssue" data-id="${i}">Remove</button>`:''}</div>
-      <label class="field"><span class="req">What is wrong</span><textarea id="iDesc${i}" data-i="${i}" rows="2" placeholder="Page, module or link, and what happens">${esc(x.desc)}</textarea></label>
-      <label class="field"><span class="req">Category</span><select id="iCat${i}" data-i="${i}"><option value="">Choose…</option>${CATS.map(c=>`<option${x.cat===c?' selected':''}>${c}</option>`).join('')}</select></label></div>`).join('')
-      +`<div><button type="button" class="btn sm" data-a="addIssue">+ Add issue</button></div>`:'';
+  // with no No the box stays in place but locked, so the auditor still sees where issues are written
+  const list=draft.issues.length?draft.issues:[{desc:'',cat:''}],off=anyNo?'':' disabled';
+  box.className='issues'+(anyNo?'':' off');
+  box.innerHTML=`<div class="sec-label">${anyNo?'Issues · each one becomes a ticket':'Issues · mark a criterion No to add one'}</div>`+list.map((x,i)=>`<div class="issue"><div class="issue-h"><span>Issue ${i+1}</span>${anyNo&&list.length>1?`<button type="button" class="btn sm" data-a="rmIssue" data-id="${i}">Remove</button>`:''}</div>
+      <label class="field"><span class="req">What is wrong</span><textarea id="iDesc${i}" data-i="${i}" rows="2" placeholder="Page, module or link, and what happens"${off}>${esc(x.desc)}</textarea></label>
+      <label class="field"><span class="req">Category</span><select id="iCat${i}" data-i="${i}"${off}><option value="">Choose…</option>${CATS.map(c=>`<option${x.cat===c?' selected':''}>${c}</option>`).join('')}</select></label></div>`).join('')
+      +`<div><button type="button" class="btn sm" data-a="addIssue"${off}>+ Add issue</button></div>`;
 }
 function submitAudit(){
   const c=course(draft.courseId), err=m=>{$('#formErr').textContent=m};
@@ -447,7 +450,7 @@ function vDash(){
   return `<div class="head"><h2>Dashboard</h2><button class="btn sm" data-a="reset">Clear all data</button></div>
   <span class="sec-label">Courses</span>
   <div class="metric hero" style="--tone:var(--accent)"><b>${cs.all}</b><span>Active courses</span>${foldBtn('courses')}</div>
-  <div class="fold-box${fold.courses?' shut':''}" id="fold-courses"><div class="metrics">${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to check','--pv','verify')}${m(cs.audit,'To audit','--warn','audit')}</div></div>
+  <div class="fold-box${fold.courses?' shut':''}" id="fold-courses"><div class="metrics">${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to check','--pv','verify')}${m(cs.audit,'Pending audit','--warn','audit')}</div></div>
   ${overdue.length?`<div class="alert"><span>⚠</span><div><b>${overdue.length} ticket${overdue.length>1?'s':''} escalated over 7 days with no fix date.</b> SELM and Auditor groups notified: ${overdue.map(t=>`<button class="link" data-a="open" data-id="${t.courseId}">${t.id}</button>`).join(', ')}</div></div>`:''}
   <span class="sec-label">Tickets</span>
   <div class="metric hero" style="--tone:var(--accent)"><b>${open.length}</b><span>Open tickets</span><small class="hero-sla${overdue.length?' bad':''}">${overdue.length} over 7-day SLA</small>${foldBtn('tickets')}</div>
@@ -612,7 +615,7 @@ const A={
     log({courseId:id,action:'Course restored',detail:'Back in the active list, waiting for audit'});save();closeOv();render();toast(`${c.code} restored · waiting for audit`)},
   reaudit(id){const c=course(id);if(isAud())return A.startAudit(id,true);
     openModal(`<div class="ov-h"><h3>Queue re-audit?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
-    <div class="ov-b"><p style="margin:0">Are you sure you want to re-audit <b>${esc(c.code)}</b> · ${esc(c.name)}? It goes back to the To audit queue for an auditor to check again.</p></div>
+    <div class="ov-b"><p style="margin:0">Are you sure you want to re-audit <b>${esc(c.code)}</b> · ${esc(c.name)}? It goes back to the Pending audit queue for an auditor to check again.</p></div>
     <div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="doReaudit" data-id="${c.id}">Queue re-audit</button></div>`)},
   doReaudit(id){closeOv();const c=course(id);c.auditorStatus='Pending';log({courseId:c.id,action:'Re-audit queued',detail:''});save();render();toast('Queued for re-audit')},
   // a re-audit that finds a No asks once before the healthy course turns Unhealthy
@@ -635,6 +638,10 @@ const A={
   openT(id){const prev=editingT;editingT=id;if(prev&&prev!==id)swapSelm(prev,false);
     swapSelm(id,true)},
   cancelT(){const id=editingT;editingT=null;if(id)swapSelm(id,false)},
+  takeBack(id){const t=ticket(id);if(!mine(t))return toast(`Only ${t.escalatedBy} can update ${id}`);
+    if(t.status!==PV_RES&&t.status!==PV_DIS)return toast(`${id} was already checked by the auditor`);
+    const was=shortStatus(t.status);t.status=t.fixDate?'In Progress':'Escalated';t.justification=null;tlog(t,'Taken back',`${was} withdrawn by SELM`);
+    editingT=id;flashId=id;save();flipRender();$(`#note-${id}`)?.focus();toast(`${id} taken back · edit and send again`)},
   resolveT(id){if(!mine(ticket(id)))return toast(`Only ${ticket(id).escalatedBy} can update ${id}`);A.saveT(id,true);const t=ticket(id);t.status=PV_RES;tlog(t,'Marked resolved','Sent for auditor verification');editingT=null;flashId=id;save();render();toast(`${id} sent for verification`)},
   discT(id){if(!mine(ticket(id)))return toast(`Only ${ticket(id).escalatedBy} can update ${id}`);const note=$(`#note-${id}`).value.trim();if(!note){$(`#note-${id}`).focus();toast('Add a note explaining why');return}
     const t=ticket(id);t.notes.push({ts:Date.now(),by:user.name,text:note});t.status=PV_DIS;t.justification=note;tlog(t,'Proposed cancellation',note);editingT=null;flashId=id;save();render();toast(`${id} sent for verification`)},

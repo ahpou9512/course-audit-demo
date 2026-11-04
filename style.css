@@ -51,6 +51,11 @@ main .wrap{padding-block:20px 60px;display:flex;flex-direction:column;gap:16px}
 .btn.danger{color:var(--bad);border-color:color-mix(in srgb,var(--bad) 45%,var(--line))}
 .btn.okb{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
 .btn.okb:hover{background:var(--ok-bg);border-color:var(--ok)}
+.btn.escb{background:var(--info);border-color:var(--info);color:#fff;font-weight:600}
+.btn.escb:hover{filter:brightness(1.1)}
+.btn.updb{color:var(--accent);border-color:var(--accent);font-weight:600}
+.btn.updb:hover{background:var(--accent-soft)}
+.tk-undo{margin-left:auto;font-weight:600}
 .btn.sm{padding:4px 10px;font-size:12.5px}
 .link{background:none;border:0;padding:0;color:var(--accent);cursor:pointer;font-weight:600}
 .link:hover{text-decoration:underline;text-underline-offset:2px}
@@ -321,6 +326,11 @@ fieldset.aud legend{font-size:12px;font-weight:600;color:var(--muted);padding:0;
 .issue{display:grid;grid-template-columns:1fr 200px;gap:10px;padding-bottom:12px;border-bottom:1px dashed var(--line)}
 .issue:last-of-type{border-bottom:0;padding-bottom:0}
 .issue-h{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:13px}
+.issues>.sec-label{color:var(--bad)}
+.issues{transition:background-color .2s,border-color .2s}
+.issues.off{border-color:var(--line);background:var(--surface-2)}
+.issues.off>.sec-label,.issues.off .issue-h,.issues.off .field>span{color:var(--muted)}
+.issues.off textarea,.issues.off select,.issues.off .btn{opacity:.55;cursor:not-allowed}
 .err{color:var(--bad);font-size:12.5px;font-weight:600}
 
 /* history */
