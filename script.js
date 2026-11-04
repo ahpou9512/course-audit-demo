@@ -233,6 +233,9 @@ const fmtPrice=p=>p==null?'—':Number(p).toLocaleString('en-US',{minimumFractio
 // a Healthy course has passed its audit, so its pricing and audience change only through a re-audit
 // pricing and audience come from the audit form; on the card they can only be corrected while tickets are being fixed
 const canEditInfo=c=>canPrice()&&c.health==='Unhealthy'&&!c.lockedBy;
+// redraw the edit trail under the current audit in place, opened and lit up so the new change is seen
+function refreshTrail(c){const a=S.audits.find(x=>x.id===c.cycleAuditId),iter=a&&$('#ck-'+a.id)?.closest('.iter');if(!iter)return;
+  openEdits.add(a.id);iter.querySelector('.aedit')?.remove();iter.querySelector('.ainfo').insertAdjacentHTML('afterend',editTrail(a));iter.querySelector('.aedit')?.classList.add('fresh')}
 const refreshInfo=c=>{if($('#priceBox'))$('#priceBox').innerHTML=priceView(c);if($('#audBox'))$('#audBox').innerHTML=audView(c)};
 const priceView=c=>`Pricing <b>${fmtPrice(c.price)}</b>${canEditInfo(c)?` <button class="link small" data-a="editPrice" data-id="${c.id}">Edit</button>`:''}`;
 const audView=c=>`Audience <b>${esc(c.audience||'—')}</b>${canEditInfo(c)?` <button class="link small" data-a="editAud" data-id="${c.id}">Edit</button>`:''}`;
@@ -240,13 +243,18 @@ const audView=c=>`Audience <b>${esc(c.audience||'—')}</b>${canEditInfo(c)?` <b
 const FOLD_KEY='course-audit-fold';
 let fold=(()=>{try{return JSON.parse(localStorage.getItem(FOLD_KEY))||{}}catch(e){return {}}})();
 const foldBtn=k=>`<button class="fold-btn" data-a="fold" data-id="${k}" aria-expanded="${!fold[k]}"><span class="fl"><span>Hide details</span><span>Show details</span></span><i>▾</i></button>`;
-// who changed this audit's answers afterwards, newest first; the changes unfold under the summary line
+// pricing and audience changes belong to the audit round they were made in; older logs without
+// an auditId fall back to the latest audit of that course made before the change
+const INFO_EDITS={'Pricing updated':'Pricing','Audience updated':'Audience'};
+const roundOf=l=>l.auditId||S.audits.filter(a=>a.courseId===l.courseId&&a.date<=l.ts).sort((x,y)=>y.date-x.date)[0]?.id;
+const editText=l=>INFO_EDITS[l.action]?`${INFO_EDITS[l.action]} ${l.detail}`:l.detail;
+// who changed this audit's answers, pricing or audience afterwards, newest first; the changes unfold under the summary line
 function editTrail(a){
-  const ed=S.logs.filter(l=>(l.action==='Criteria updated'||l.action==='Ticket removed')&&l.auditId===a.id).reverse();if(!ed.length)return '';
+  const ed=S.logs.filter(l=>(l.action==='Criteria updated'||l.action==='Ticket removed')&&l.auditId===a.id||INFO_EDITS[l.action]&&l.courseId===a.courseId&&roundOf(l)===a.id).reverse();if(!ed.length)return '';
   const open=openEdits.has(a.id),last=ed[0];
   return `<div class="aedit${open?' open':''}" id="ae-${a.id}"><div class="aedit-h">✎ Edited ${ed.length} time${ed.length>1?'s':''} · last by ${esc(last.actor)}, ${fmtDT(last.ts)}
     <button type="button" class="link small" data-a="toggleEdits" data-id="${a.id}">${open?'Hide changes':'Show changes'}</button></div>
-    <ol>${ed.map(l=>`<li><span class="mono">${fmtDT(l.ts)}</span><b>${esc(l.actor)}</b><span class="chg-list">${l.detail.split('; ').map(esc).join('<br>')}</span></li>`).join('')}</ol></div>`;
+    <ol>${ed.map(l=>`<li><span class="mono">${fmtDT(l.ts)}</span><b>${esc(l.actor)}</b><span class="chg-list">${editText(l).split('; ').map(esc).join('<br>')}</span></li>`).join('')}</ol></div>`;
 }
 const critChips=a=>{const no=CRITERIA.filter((_,j)=>a.checklist[j]==='No'),yes=a.checklist.filter(v=>v==='Yes').length,na=a.checklist.filter(v=>v==='N/A').length;
   return `<div class="chips crit-sum">${no.map(l=>`<span class="cchip t-bad">✕ ${esc(l)}</span>`).join('')}<span class="cchip t-ok">✓ ${no.length?`${yes} Yes`:'All Yes'}</span>${na?`<span class="cchip t-gray">${na} N/A</span>`:''}</div>`};
@@ -304,10 +312,12 @@ const audEdit=t=>`<div class="tk-form tk-aud"><label class="field"><span>Categor
 function swapAud(id,html){const card=document.querySelector(`.tk[data-tid="${id}"]`),part=card?.querySelector('.tk-aud');if(!part)return swapCard(id);
   const h0=card.offsetHeight;part.outerHTML=html;card.querySelector('.tk-aud').classList.add('enter');glide(card,h0);return card}
 const selmAct=t=>`<div class="tk-btns tk-act"><button class="btn updb sm" data-a="openT" data-id="${t.id}">Update <span class="arr" aria-hidden="true">→</span></button></div>`;
+// an escalation can be undone by the same SELM until work starts (no fix date, no note yet)
+const canUndoEsc=t=>t.status==='Escalated'&&!t.fixDate&&!t.notes.length&&mine(t);
 const selmForm=t=>`<div class="tk-form">
       <label class="field"><span>Tentative fix date</span><input type="date" id="fix-${t.id}" value="${t.fixDate?toInput(t.fixDate):''}"></label>
       <label class="field grow"><span>Note</span><input type="text" id="note-${t.id}" placeholder="Progress, owner, or reason to cancel"></label>
-      <div class="tk-btns"><button class="btn sm" data-a="saveT" data-id="${t.id}">Save</button><button class="btn okb sm" data-a="resolveT" data-id="${t.id}">Resolved</button><button class="btn danger sm" data-a="discT" data-id="${t.id}">Cancel</button><button type="button" class="btn sm tk-back" data-a="cancelT" aria-label="Back without saving" title="Back without saving (Esc)"><span aria-hidden="true">←</span> Back</button></div></div>`;
+      <div class="tk-btns"><button class="btn sm" data-a="saveT" data-id="${t.id}">Save</button><button class="btn okb sm" data-a="resolveT" data-id="${t.id}">Resolved</button><button class="btn danger sm" data-a="discT" data-id="${t.id}">Cancel</button>${canUndoEsc(t)?`<button type="button" class="btn sm" data-a="undoEsc" data-id="${t.id}" title="Put it back to New for any SELM"><span aria-hidden="true">↶</span> Undo escalate</button>`:''}<button type="button" class="btn sm tk-back" data-a="cancelT" aria-label="Back without saving" title="Back without saving (Esc)"><span aria-hidden="true">←</span> Back</button></div></div>`;
 function ticketRow(c,t,st){
   const pv=t.status===PV_RES||t.status===PV_DIS;
   let note='';
@@ -361,7 +371,7 @@ function auditForm(c){
       <label class="field"><span>Docebo pricing</span><input type="text" id="fPrice" inputmode="decimal" autocomplete="off" value="${esc(d.price)}"></label>
       <fieldset class="aud"><legend class="req">Catalog audience</legend><div class="aud-opts">${AUDIENCES.map(a=>`<label class="aud-opt"><input type="checkbox" name="fAud" value="${a}"${d.aud.includes(a)?' checked':''}> ${a}</label>`).join('')}</div></fieldset>
     </div>`}
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="sec-label">Criteria</span><button type="button" class="btn sm" data-a="markAllYes">All Yes</button></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="sec-label">Criteria <span class="auto-yes" id="autoYes"></span></span><button type="button" class="btn sm" data-a="markAllYes">All Yes</button></div>
     <div class="crit">${CRITERIA.map((l,i)=>`<div class="crit-row${d.crit[i]==='No'?' no':''}" id="cr${i}"><span>${l}</span>
       <div class="seg" role="radiogroup" aria-label="${l}">${answers(i).map(v=>`<label><input type="radio" name="c${i}" value="${v}"${d.crit[i]===v?' checked':''}><span class="${v==='Yes'?'y':v==='No'?'n':'na'}">${v}</span></label>`).join('')}</div></div>`).join('')}</div>
     <div id="issues"></div>
@@ -373,6 +383,7 @@ function renderIssues(){
   const anyNo=draft.crit.includes('No');
   if(anyNo&&!draft.issues.length)draft.issues=[{desc:'',cat:''}];
   document.querySelectorAll('.crit-row').forEach((r,i)=>r.classList.toggle('no',draft.crit[i]==='No'));
+  const blank=draft.crit.filter(v=>!v).length;if($('#autoYes'))$('#autoYes').textContent=anyNo&&blank?`· ${blank} unanswered will be saved as Yes`:'';
   // with no No the box stays in place but locked, so the auditor still sees where issues are written
   const list=draft.issues.length?draft.issues:[{desc:'',cat:''}],off=anyNo?'':' disabled';
   box.className='issues'+(anyNo?'':' off');
@@ -384,7 +395,7 @@ function renderIssues(){
 function submitAudit(){
   const c=course(draft.courseId), err=m=>{$('#formErr').textContent=m};
   const left=draft.crit.filter(v=>!v).length;
-  if(left)return err(`Answer all criteria (${left} left).`);
+  if(left&&!draft.crit.includes('No'))return err(`Answer all criteria (${left} left), or mark the failed ones No.`);
   if(!draft.aud.length)return err('Choose at least one catalog audience.');
   const price=toPrice(draft.price);
   if(Number.isNaN(price))return err('Docebo pricing must be a number of 0 or more.');
@@ -401,7 +412,7 @@ function submitAudit(){
       return openModal(`<div class="ov-h"><h3>Mark ${esc(c.code)} Unhealthy?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
         <div class="ov-b"><p style="margin:0">${n} criteri${n>1?'a':'on'} marked No. The course changes from Healthy to Unhealthy and ${k} ticket${k>1?'s are':' is'} created.</p></div>
         <div class="ov-f"><button class="btn" data-a="close">Back to form</button><button class="btn danger" data-a="confirmFail">Mark Unhealthy</button></div>`)}
-    const a=addAudit(c,'Failed',[...draft.crit],info,draft.issues.map(x=>({...x})));
+    const a=addAudit(c,'Failed',draft.crit.map(v=>v||'Yes'),info,draft.issues.map(x=>({...x})));
     const made=draft.issues.map(x=>{const t={id:'TKT-'+S.seq.t++,courseId:c.id,auditId:a.id,category:x.cat,detail:x.desc.trim(),status:'New',createdAt:ts,
       escalatedAt:null,escalatedBy:null,fixDate:null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};S.tickets.push(t);return t});
     c.health='Unhealthy';c.auditorStatus='In Progress';c.cycleAuditId=a.id;c.lastAudited=ts;c.lastAuditor=user.name;
@@ -638,6 +649,9 @@ const A={
   openT(id){const prev=editingT;editingT=id;if(prev&&prev!==id)swapSelm(prev,false);
     swapSelm(id,true)},
   cancelT(){const id=editingT;editingT=null;if(id)swapSelm(id,false)},
+  undoEsc(id){const t=ticket(id);if(!canUndoEsc(t))return toast(`${id} can't be undone once a fix date or note is saved`);
+    t.status='New';t.escalatedAt=null;t.escalatedBy=null;tlog(t,'Escalation undone','Back to New');editingT=null;save();
+    swapCard(id,true);toast(`${id} is back to New`)},
   takeBack(id){const t=ticket(id);if(!mine(t))return toast(`Only ${t.escalatedBy} can update ${id}`);
     if(t.status!==PV_RES&&t.status!==PV_DIS)return toast(`${id} was already checked by the auditor`);
     const was=shortStatus(t.status);t.status=t.fixDate?'In Progress':'Escalated';t.justification=null;tlog(t,'Taken back',`${was} withdrawn by SELM`);
@@ -687,7 +701,7 @@ const A={
   cancelPrice(id){$('#priceBox').innerHTML=priceView(course(id))},
   savePrice(id){const c=course(id),v=toPrice($('#priceIn').value),old=c.price??null;
     if(Number.isNaN(v)){$('#priceErr').textContent='Enter a number of 0 or more.';return}
-    if(v!==old){c.price=v;log({courseId:id,action:'Pricing updated',detail:`${fmtPrice(old)} → ${fmtPrice(v)}`});save();toast('Pricing updated')}
+    if(v!==old){c.price=v;log({courseId:id,auditId:c.cycleAuditId,action:'Pricing updated',detail:`${fmtPrice(old)} → ${fmtPrice(v)}`});save();refreshTrail(c);toast('Pricing updated')}
     A.cancelPrice(id)},
   editAud(id){const c=course(id),cur=audList(c.audience);
     $('#audBox').innerHTML=`<span class="price-edit aud-edit">Audience ${AUDIENCES.map(a=>`<label class="aud-opt"><input type="checkbox" name="eAud" value="${a}"${cur.includes(a)?' checked':''}> ${a}</label>`).join('')}
@@ -695,7 +709,7 @@ const A={
   cancelAud(id){$('#audBox').innerHTML=audView(course(id))},
   saveAud(id){const c=course(id),v=[...document.querySelectorAll('input[name=eAud]:checked')].map(x=>x.value).join(', '),old=c.audience||'';
     if(!v){$('#audErr').textContent='Choose at least one.';return}
-    if(v!==old){c.audience=v;log({courseId:id,action:'Audience updated',detail:`${old||'—'} → ${v}`});save();toast('Audience updated')}
+    if(v!==old){c.audience=v;log({courseId:id,auditId:c.cycleAuditId,action:'Audience updated',detail:`${old||'—'} → ${v}`});save();refreshTrail(c);toast('Audience updated')}
     A.cancelAud(id)},
   fold(k){fold[k]=!fold[k];try{localStorage.setItem(FOLD_KEY,JSON.stringify(fold))}catch(e){}
     $('#fold-'+k).classList.toggle('shut',!!fold[k]);$(`.fold-btn[data-id=${k}]`).setAttribute('aria-expanded',!fold[k])},
