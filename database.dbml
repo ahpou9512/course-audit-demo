@@ -57,7 +57,7 @@ Table Courses {
   Id int [pk, increment]
   Code varchar [not null, unique]
   Name varchar [not null]
-  Type varchar
+  Type varchar [note: 'Learning Plan / ILT / On-Demand']
   DoceboPrice decimal(10,2) [note: 'null = not filled in yet']
   Health CourseHealth [not null, default: 'Pending Audit']
   AuditStatus AuditStatus [not null, default: 'Pending']
@@ -72,7 +72,7 @@ Table Courses {
 
 Table CourseAudiences {
   CourseId int [ref: > Courses.Id]
-  Audience varchar [note: 'Partner / DSP / Customer / Tailored / TD']
+  Audience varchar [note: 'Partner / DSP / Customer / Tailored / TD; a course may have none']
 
   indexes {
     (CourseId, Audience) [pk] // composite primary key
@@ -97,6 +97,10 @@ Table Audits {
   PriceSnapshot decimal(10,2) [note: 'pricing at the time of this audit']
   AudienceSnapshot varchar
   Note varchar
+
+  indexes {
+    (AuditorId, AuditedAt) // Team page: audits per auditor, per month
+  }
 }
 
 Table AuditAnswers {
@@ -144,6 +148,10 @@ Table ActivityLogs {
   CourseId int [not null, ref: > Courses.Id]
   TicketId int [ref: > Tickets.Id]
   AuditId int [ref: > Audits.Id, note: 'set for criteria edits']
-  Action varchar [not null]
+  Action varchar [not null, note: 'see the Action list in database.md']
   Detail varchar
+
+  indexes {
+    (ActorId, Action, CreatedAt) // Team page: fixes verified per auditor
+  }
 }

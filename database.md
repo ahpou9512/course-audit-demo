@@ -146,6 +146,7 @@ erDiagram
 | 字段 | 可能的值 |
 |---|---|
 | `USERS.Role` | `Auditor`、`SELM`、`CourseOwner` |
+| `COURSES.Type` | `Learning Plan`、`ILT`、`On-Demand`（以前叫 `E-Learning` 的，一律改成 `Learning Plan`） |
 | `COURSES.Health` | `Pending Audit`、`Unhealthy`、`Healthy`、`Discontinued` |
 | `COURSES.AuditStatus` | `Pending`（等 auditor）、`In Progress`（这一轮的 ticket 还没处理完）、`Completed` |
 | `AUDITS.Result` | `Passed`、`Failed` |
@@ -154,7 +155,7 @@ erDiagram
 | `TICKETS.Status` | `New`、`Escalated`、`In Progress`、`Retest Failed`、`Pending Verification - Resolved`、`Pending Verification - Cancelled`、`Closed` |
 | `TICKETS.ClosedAs` | `Resolved`、`Cancelled` |
 
-课程列表上的 To audit / Unhealthy / Ready to check / Healthy / Discontinued **不用另外存**，可以从 `Health`、`AuditStatus`、`LockedById` 和还没关的 ticket 算出来。
+课程列表上的 Pending audit / Unhealthy / Ready to check / Healthy / Discontinued **不用另外存**，可以从 `Health`、`AuditStatus`、`LockedById` 和还没关的 ticket 算出来。
 
 ## 每张表的用途
 
@@ -162,7 +163,7 @@ erDiagram
 |---|---|---|
 | USERS | 用户和角色（Auditor / SELM / CourseOwner） | `USERS` 常数 |
 | COURSES | 课程、Docebo pricing、目前状态、谁正在 audit、下架资料 | `S.courses` |
-| COURSE_AUDIENCES | 课程的 catalog audience，可以多选（Partner、DSP、Customer、Tailored、TD） | `course.audience` 字符串 |
+| COURSE_AUDIENCES | 课程的 catalog audience，可以多选（Partner、DSP、Customer、Tailored、TD），也可以一个都没有 | `course.audience` 字符串 |
 | CRITERIA | 固定的 8 条 criteria（H–O），只有前三条 `AllowNA = true` | `CRITERIA` 常数 |
 | AUDITS | 每一次 audit | `S.audits` |
 | AUDIT_ANSWERS | 每次 audit 的每条 criteria 答案：Yes / No / N/A | `audit.checklist` 数组 |
@@ -183,11 +184,44 @@ erDiagram
 9. **下架的课程不删除。** `Health = Discontinued` 加上 `DiscontinuedAt / ById / Reason`，资料和历史都保留，可以 restore。只有从来没 audit 过的课程才真的删除（`DELETE`）。
 10. **Criteria 改了要留下痕迹。** Auditor 用 Edit criteria 改答案时，`AUDIT_ANSWERS` 直接更新成新的答案，同时在 `ACTIVITY_LOGS` 写一笔 `Action = Criteria updated`、`AuditId` 指向那次 audit、`Detail` 写 "Launch URL works: No → Yes"。这样画面可以在那次 audit 下面列出修改记录，也能倒推出最原本的答案。
 11. **Cancel 和 Discontinue 是不同层级。** Cancel 只关一张 ticket（`ClosedAs = Cancelled`）；Discontinue 是整门课下架。
+12. **Team 页面的数字不另外存，用查询算。** 每个 auditor 的统计都从现有的表算出来：
+
+    | 数字 | 怎么算 |
+    |---|---|
+    | Audits | `AUDITS` 里 `AuditorId` 是他、`IsReverification = false` 的行数 |
+    | Courses audited | 同上，`CourseId` 不重复的数量 |
+    | Issues raised | `TICKETS` 里 `CreatedById` 是他的数量（包括之后补开的） |
+    | Fixes verified | `ACTIVITY_LOGS` 里 `ActorId` 是他、`Action = Ticket closed` 的行数 |
+    | Audits per month | `AUDITS` 按 `AuditedAt` 的年月分组计数 |
+
+    "This month" 只是多加一个条件：`AuditedAt >= 这个月 1 号`。EF Core 写起来大概是：
+
+    ```csharp
+    var monthStart = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+    var stats = await db.Audits
+        .Where(a => !a.IsReverification && a.AuditedAt >= monthStart)
+        .GroupBy(a => a.AuditorId)
+        .Select(g => new { AuditorId = g.Key, Audits = g.Count(), Courses = g.Select(a => a.CourseId).Distinct().Count() })
+        .ToListAsync();
+    ```
+
+    资料多了以后，在 `AUDITS (AuditorId, AuditedAt)` 和 `ACTIVITY_LOGS (ActorId, Action, CreatedAt)` 加 index，查询就会快。
+
+## ACTIVITY_LOGS.Action 的值
+
+| 对象 | Action |
+|---|---|
+| 课程 | `Course registered`、`Course discontinued`、`Course restored`、`Re-audit queued`、`Pricing updated`、`Audience updated` |
+| Audit | `Audit passed`、`Audit failed`、`Criteria updated`、`Re-verification approved` |
+| Ticket（Auditor） | `Ticket created`、`Added after audit`、`Edited by auditor`、`Ticket removed`、`Ticket closed`、`Retest failed`、`Cancellation rejected` |
+| Ticket（SELM） | `Escalated`、`Escalation undone`、`Fix date set`、`Fix date changed`、`Status → In Progress`、`Note added`、`Marked resolved`、`Proposed cancellation`、`Taken back` |
 
 ## 规则（服务器端要检查）
 
 - `AUDIT_ANSWERS.Answer` 只能是 `Yes`、`No`、`N/A`；`N/A` 只在 `CRITERIA.AllowNA = true` 时允许。
 - 有任何 `No` 就一定要开至少一张 ticket。
+- 有 `No` 时，Auditor 没选的 criteria 一律存成 `Yes`，所以每次 audit 在 `AUDIT_ANSWERS` 永远是完整的 8 行；一个 `No` 都没有（全部通过）时，8 条都要明确选过才能提交。
+- Catalog audience 是选填：audit 表单和课程页都可以一个都不选，`COURSE_AUDIENCES` 就没有这门课的行，`AudienceSnapshot` 是空的。
 - 还有 ticket 没关时，这次 audit 至少要留一个 `No`。
 - 全部 ticket 关闭后，自动建一次 re-verification audit（`IsReverification = true`），答案全部是 `Yes`，原本 `N/A` 的保持 `N/A`。
 - SLA：`Status = Escalated`、`FixDate` 是空的、而且 `EscalatedAt` 超过 7 天，就算超时。
