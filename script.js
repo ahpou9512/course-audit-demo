@@ -327,6 +327,7 @@ function ticketRow(c,t,st){
   if(t.status===CLOSED)below='';
   else if(isSelm()&&t.status==='New')below=tkFoot(`<button class="btn escb sm" data-a="escalate" data-id="${t.id}"><span aria-hidden="true">↑</span> Escalate</button>`);
   else if(isSelm()&&WORKING.includes(t.status)&&mine(t))below=editingT===t.id?selmForm(t):selmAct(t);
+  else if(isSelm()&&WORKING.includes(t.status)&&!mine(t))below=tkFoot(`<span class="muted small">With ${esc(t.escalatedBy)}</span><button class="btn sm tk-undo" data-a="takeOver" data-id="${t.id}"><span aria-hidden="true">⇄</span> Take over</button>`);
   else if(isSelm()&&pv&&mine(t))below=tkFoot(`<span class="muted small">Waiting for auditor</span><button class="btn sm tk-undo" data-a="takeBack" data-id="${t.id}"><span aria-hidden="true">↶</span> Take back</button>`);
   else if(isAud()&&t.status==='New')below=audAct(t);
   else if(isAud()&&pv)below=rejecting===t.id?rejectBox(t):approveBox(t);
@@ -695,6 +696,16 @@ const A={
   undoEsc(id){const t=ticket(id);if(!canUndoEsc(t))return toast(`${id} can't be undone once a fix date or note is saved`);
     t.status='New';t.escalatedAt=null;t.escalatedBy=null;tlog(t,'Escalation undone','Back to New');editingT=null;save();
     swapCard(id,true);toast(`${id} is back to New`)},
+  takeOver(id){const t=ticket(id);
+    openModal(`<div class="ov-h"><h3>Take over ${id}?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+      <div class="ov-b"><p style="margin:0">${esc(t.category)} · ${esc(t.detail)}</p><p class="muted small" style="margin:0">It moves from ${esc(t.escalatedBy)} to you. The fix date and the SLA clock stay as they are.</p></div>
+      <div class="ov-f"><button class="btn" data-a="close">Back</button><button class="btn primary" data-a="doTakeOver" data-id="${id}">Take over</button></div>`)},
+  doTakeOver(id){const t=ticket(id);closeOv();
+    if(!WORKING.includes(t.status)||mine(t))return toast(`${id} has changed; nothing to take over`);
+    const from=t.escalatedBy;t.escalatedBy=user.name;tlog(t,'Taken over',`from ${from}`);save();
+    // the new owner goes straight to the form, like after escalating
+    const prev=editingT;editingT=id;if(prev&&prev!==id)swapSelm(prev,false);
+    swapCard(id,true)?.querySelector('.tk-form')?.classList.add('enter');toast(`${id} is now yours`)},
   takeBack(id){const t=ticket(id);if(!mine(t))return toast(`Only ${t.escalatedBy} can update ${id}`);
     if(t.status!==PV_RES&&t.status!==PV_DIS)return toast(`${id} was already checked by the auditor`);
     const was=shortStatus(t.status);t.status=t.fixDate?'In Progress':'Escalated';t.justification=null;tlog(t,'Taken back',`${was} withdrawn by SELM`);

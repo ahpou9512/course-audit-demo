@@ -177,7 +177,7 @@ erDiagram
 2. **多选和列表拆成另一张表。** audience 和 8 个答案在 demo 里是字符串或数组；在数据库里拆开，才能做统计，例如"哪条 criteria 最常是 No"。
 3. **算得出来的不存。** demo 的 `auditCount`、`lastAudited`、`lastAuditor` 可以从 `AUDITS` 算出来，存了反而可能对不上。
 4. **Criteria 是数据，不是代码。** 以后要加第 9 条，或改哪几条可以 N/A，只要改 `CRITERIA` 表。
-5. **Ticket 的拥有者是 `EscalatedById`。** 只有 escalate 的那个 SELM 可以更新这张 ticket，服务器端要检查这一点。
+5. **Ticket 的拥有者是 `EscalatedById`。** 只有拥有者可以更新这张 ticket，服务器端要检查这一点；拥有者请假时，别的 SELM 用 take over 接手，变成新的拥有者。
 6. **Pricing 用 `decimal(10,2)`，不用文字。** 文字可以输入任何东西（例如 `fdafasd`），也不能计算、比较或正确排序；金额也不要用 `float`，会有小数误差。空的（null）代表还没填。
 7. **Audit 记下当时的 pricing 和 audience**（`PriceSnapshot`、`AudienceSnapshot`），这样课程之后被修改，旧的 audit 还看得到当时的值。
 8. **AUDITS 只在提交时才写入。** 打开 audit 表单只是锁定课程（`LockedById`、`LockedAt`），中途放弃的话不会留下任何 audit 记录，课程状态也不变。
@@ -214,7 +214,7 @@ erDiagram
 | 课程 | `Course registered`、`Course discontinued`、`Course restored`、`Re-audit queued`、`Pricing updated`、`Audience updated` |
 | Audit | `Audit passed`、`Audit failed`、`Criteria updated`、`Re-verification approved` |
 | Ticket（Auditor） | `Ticket created`、`Added after audit`、`Edited by auditor`、`Ticket removed`、`Ticket closed`、`Retest failed`、`Cancellation rejected` |
-| Ticket（SELM） | `Escalated`、`Escalation undone`、`Fix date set`、`Fix date changed`、`Status → In Progress`、`Note added`、`Marked resolved`、`Proposed cancellation`、`Taken back` |
+| Ticket（SELM） | `Escalated`、`Escalation undone`、`Fix date set`、`Fix date changed`、`Status → In Progress`、`Note added`、`Marked resolved`、`Proposed cancellation`、`Taken back`、`Taken over` |
 
 ## 规则（服务器端要检查）
 
@@ -233,6 +233,7 @@ erDiagram
 - 只有 escalate 的 SELM（`EscalatedById`）可以更新、Resolve 或 Cancel 那张 ticket；只有 Auditor 可以 Approve 或 Reject。
 - Pricing 和 Audience 每次修改都要在 `ACTIVITY_LOGS` 记一笔（`Pricing updated` / `Audience updated`，`Detail` 写 `旧值 → 新值`），`AuditId` 指向这一轮的 audit，画面上显示在那一轮 audit 的修改记录里。
 - 按错 escalate 可以 undo：只限同一个 SELM，而且还是 `Escalated`、`FixDate` 是空的、没有任何 `TICKET_NOTES`。Undo 后 `Status` 回到 `New`，`EscalatedById`、`EscalatedAt` 清空，`ACTIVITY_LOGS` 记一笔 `Escalation undone`。
+- SELM 请假（AL / MC）时，别的 SELM 可以 take over 还在处理中（`Escalated`、`In Progress`、`Retest Failed`）的 ticket：`EscalatedById` 换成接手的人，`EscalatedAt` 和 `FixDate` 不变（SLA 照算），`ACTIVITY_LOGS` 记 `Taken over`，`Detail` 写原本的人。
 - SELM 送出 Resolved 或 Cancel 后，在 Auditor 审核前可以 take back：`Status` 回到 `In Progress`（没有 `FixDate` 就回到 `Escalated`），`Justification` 清空，`ACTIVITY_LOGS` 记 `Taken back`。
 - Ticket 填了 `FixDate` 就从 `Escalated` 变成 `In Progress`。
 - Cancel ticket 一定要写原因（存在 `Justification`），Auditor 确认后 `ClosedAs = Cancelled`，课程不会下架。
