@@ -369,7 +369,7 @@ function auditForm(c){
       <div class="field"><span>Catalog audience</span><b>${esc(c.audience||'—')}</b></div></div>`
     :`<div class="info-fields">
       <label class="field"><span>Docebo pricing</span><input type="text" id="fPrice" inputmode="decimal" autocomplete="off" value="${esc(d.price)}"></label>
-      <fieldset class="aud"><legend class="req">Catalog audience</legend><div class="aud-opts">${AUDIENCES.map(a=>`<label class="aud-opt"><input type="checkbox" name="fAud" value="${a}"${d.aud.includes(a)?' checked':''}> ${a}</label>`).join('')}</div></fieldset>
+      <fieldset class="aud"><legend>Catalog audience</legend><div class="aud-opts">${AUDIENCES.map(a=>`<label class="aud-opt"><input type="checkbox" name="fAud" value="${a}"${d.aud.includes(a)?' checked':''}> ${a}</label>`).join('')}</div></fieldset>
     </div>`}
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="sec-label">Criteria <span class="auto-yes" id="autoYes"></span></span><button type="button" class="btn sm" data-a="markAllYes">All Yes</button></div>
     <div class="crit">${CRITERIA.map((l,i)=>`<div class="crit-row${d.crit[i]==='No'?' no':''}" id="cr${i}"><span>${l}</span>
@@ -396,7 +396,6 @@ function submitAudit(){
   const c=course(draft.courseId), err=m=>{$('#formErr').textContent=m};
   const left=draft.crit.filter(v=>!v).length;
   if(left&&!draft.crit.includes('No'))return err(`Answer all criteria (${left} left), or mark the failed ones No.`);
-  if(!draft.aud.length)return err('Choose at least one catalog audience.');
   const price=toPrice(draft.price);
   if(Number.isNaN(price))return err('Docebo pricing must be a number of 0 or more.');
   // a re-audit is saved when it finds a No or changes an answer (e.g. Yes → N/A); otherwise Cancel audit keeps it as it was
@@ -531,7 +530,7 @@ const A={
   addCourse(){openModal(`<form id="addForm" novalidate style="display:contents"><div class="ov-h"><h3>Add a course</h3><button type="button" class="x" data-a="close" aria-label="Close">×</button></div>
     <div class="ov-b"><label class="field"><span class="req">Course code</span><input type="text" id="nCode" placeholder="e.g. ESSTGD04406"></label>
     <label class="field"><span class="req">Course name</span><input type="text" id="nName"></label>
-    <label class="field"><span>Type</span><select id="nType"><option>E-Learning</option><option>ILT</option><option>On-Demand</option></select></label>
+    <label class="field"><span>Type</span><select id="nType"><option>Learning Plan</option><option>ILT</option><option>On-Demand</option></select></label>
     <span class="err" id="nErr"></span></div>
     <div class="ov-f"><button type="button" class="btn" data-a="close">Cancel</button><button type="submit" class="btn primary">Add</button></div></form>`);$('#nCode').focus()},
   saveCourse(){
@@ -708,8 +707,7 @@ const A={
       <button class="btn primary sm" data-a="saveAud" data-id="${id}">Save</button><button class="btn sm" data-a="cancelAud" data-id="${id}">Cancel</button><span class="err" id="audErr"></span></span>`},
   cancelAud(id){$('#audBox').innerHTML=audView(course(id))},
   saveAud(id){const c=course(id),v=[...document.querySelectorAll('input[name=eAud]:checked')].map(x=>x.value).join(', '),old=c.audience||'';
-    if(!v){$('#audErr').textContent='Choose at least one.';return}
-    if(v!==old){c.audience=v;log({courseId:id,auditId:c.cycleAuditId,action:'Audience updated',detail:`${old||'—'} → ${v}`});save();refreshTrail(c);toast('Audience updated')}
+    if(v!==old){c.audience=v;log({courseId:id,auditId:c.cycleAuditId,action:'Audience updated',detail:`${old||'—'} → ${v||'—'}`});save();refreshTrail(c);toast('Audience updated')}
     A.cancelAud(id)},
   fold(k){fold[k]=!fold[k];try{localStorage.setItem(FOLD_KEY,JSON.stringify(fold))}catch(e){}
     $('#fold-'+k).classList.toggle('shut',!!fold[k]);$(`.fold-btn[data-id=${k}]`).setAttribute('aria-expanded',!fold[k])},
@@ -762,6 +760,8 @@ document.addEventListener('submit',e=>{
 S=load(); if(!S||!S.seq)fresh();
 // older data stored pricing as free text; keep it only if it reads as a number
 [...S.courses,...S.audits].forEach(x=>{if(typeof x.price==='string'){const p=toPrice(x.price);x.price=Number.isNaN(p)?null:p}});
+// the E-Learning course type is now called Learning Plan
+S.courses.forEach(c=>{if(c.type==='E-Learning')c.type='Learning Plan'});
 // older data only recorded passed audits as "last audited"; take the latest audit of any result
 S.courses.forEach(c=>{const a=S.audits.filter(x=>x.courseId===c.id).sort((x,y)=>y.date-x.date)[0];
   if(a&&(!c.lastAudited||a.date>c.lastAudited)){c.lastAudited=a.date;c.lastAuditor=a.auditor}});
