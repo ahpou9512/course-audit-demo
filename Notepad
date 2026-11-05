@@ -3,3 +3,10 @@ escalate 和 update button 太像了
 然後那個 8個criteria 右邊全部是no 那個 N/A 要在中間
 上面的to audit 換成pending audit吧
 黨沒有選No 的時候 那個issue box 也要顯示出來 不過是disable 的方式， 因爲有auditor issue 寫在哪裏
+
+
+當auditor audit 了course， 那個issue 也要有日期 和那個7 days SLA 一樣
+ready to check 換成ready to revalidate
+然後我還在想 就是 如果selm 一直不去換tentative fix date 的話 不久沒完沒了了嗎？ 這個的話 有什麽想法 / 然後如果要換tentative fix date 一定要寫note
+還有那個course restore 后直接去pending audit。 如果發現有一樣的course 先給通知， 然後再force restore。
+
