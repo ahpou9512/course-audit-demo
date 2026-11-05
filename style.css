@@ -255,6 +255,9 @@ html{overflow-y:scroll}
   .fc-body>.tk{grid-template-columns:minmax(0,1fr);grid-template-rows:none}
   .fc-body .recs{grid-column:1;grid-row:auto;padding-left:0;border-left:0;border-top:1px solid var(--line);padding-top:12px;max-height:none;overflow:visible}
 }
+.aud-sla{font-size:12px;color:var(--muted)}
+td>.aud-sla{display:block;margin-top:4px}
+.aud-sla.late{color:var(--bad);font-weight:600}
 .move-hi{color:var(--bad);font-weight:600}
 .info-log{display:flex;flex-direction:column;gap:6px;font-size:13px;overflow-wrap:anywhere}
 .move-why{min-width:180px;overflow-wrap:anywhere}

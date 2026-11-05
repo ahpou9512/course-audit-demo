@@ -40,6 +40,12 @@ const openOf=cid=>ticketsOf(cid).filter(t=>t.status!==CLOSED);
 // two 7-day clocks: raised -> escalated, then escalated -> fix date set
 const slaFrom=t=>t.status==='New'?t.createdAt:t.status==='Escalated'&&!t.fixDate?t.escalatedAt:null;
 const isOverdue=t=>{const s=slaFrom(t);return !!s&&Date.now()-s>7*DAY};
+// a course waiting for audit also has 7 days, counted from when it was added, restored or queued for re-audit
+const pendingSince=c=>Math.max(c.createdAt||0,...S.logs.filter(l=>l.courseId===c.id&&['Course registered','Course restored','Re-audit queued'].includes(l.action)).map(l=>l.ts));
+const auditLate=c=>stage(c)==='audit'&&Date.now()-pendingSince(c)>7*DAY;
+function auditFlag(c){if(stage(c)!=='audit')return '';const d=daysSince(pendingSince(c));
+  if(auditLate(c))return `<span class="aud-sla late">${d}d not audited</span>`;
+  return `<span class="aud-sla">${7-d>0?`${7-d}d left to audit`:'Last day to audit'}</span>`}
 // fix date tracking: how often it moved and whether it was missed
 const movesOf=t=>S.logs.filter(l=>l.ticketId===t.id&&l.action==='Fix date changed').length;
 const etaMissed=t=>t.fixDate&&WORKING.includes(t.status)?Math.max(0,daysSince(t.fixDate)):0;
@@ -211,7 +217,7 @@ function courseRows(){
   const pageList=list.slice((page-1)*PAGE,page*PAGE);
   return `  ${list.length?pageList.map((c,i)=>{const [txt,me]=nextStep(c), shown=shownOf(c), hit=!tkF||shown.some(tkHit), fade=hit&&(catFilter||tkF||myF&&isSelm());return `<tr class="click${hit?'':' dim'}${rowAnim?' row-in':''}${c.id===flashId?' flash':''}" style="--i:${Math.min(i,12)}" data-a="open" data-id="${c.id}" tabindex="0">
     <td><div class="cname"><span class="mono">${esc(c.code)}</span><b>${esc(c.name)}</b></div></td>
-    <td>${pill(healthLabel(c))}</td>
+    <td>${pill(healthLabel(c))}${auditFlag(c)}</td>
     <td>${shown.length?`<div class="catlist">${shown.map(t=>{const done=t.status===CLOSED,dis=t.closedAs==='Cancelled'||t.closedAs==='Discontinued';
       return `<div class="ci${done?' closed':''}${fade&&!tkHit(t)?' other':''}" title="${t.id}">${done?`<span class="dot chk${dis?' dis':''}">✓</span>`:`<span class="dot ${tone(t.status)}"></span>`}<span class="cn">${esc(t.category)}</span>
       ${done?`<span class="cs ${dis?'':'ok'}">${dis?esc(t.closedAs):'Approved'}</span>`:`<span class="cs${isOverdue(t)||etaMissed(t)?' late':''}">${esc(shortStatus(t.status))}${tkFlag(t)?` · ${tkFlag(t)}`:''}</span>`}</div>`}).join('')}</div>`:'<span class="muted">—</span>'}</td>
@@ -240,7 +246,7 @@ function vCourse(){
   return `<button class="link back" data-a="go" data-id="courses">← All courses</button>
   <div class="panel cover${st==='disc'?' gone':''}"><div class="chead"><div style="display:flex;flex-direction:column;gap:6px">
       <span class="mono muted">${esc(c.code)} · ${esc(c.type)}${open.length?` · ${open.length} open issue${open.length>1?'s':''}`:''}</span><h2>${esc(c.name)}</h2>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${pill(healthLabel(c))}${st==='audit'&&c.health==='Healthy'?pill('Re-audit queued'):''}${discInfo(c)}</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${pill(healthLabel(c))}${st==='audit'&&c.health==='Healthy'?pill('Re-audit queued'):''}${auditFlag(c)}${discInfo(c)}</div></div>
       <div class="chead-act">${isOwner()&&st!=='disc'?`<button class="btn" data-a="editCourse" data-id="${c.id}">Edit course</button>`:''}${btn}${(isAud()||isOwner())&&st!=='disc'?(!runs.length&&!ticketsOf(c.id).length?(c.lockedBy?'':`<button class="btn danger" data-a="delCourse" data-id="${c.id}">Delete course</button>`)
         :`<button class="btn danger" data-a="discCourse" data-id="${c.id}">Discontinue course</button>`):''}${isAud()&&st==='disc'?`<button class="btn" data-a="restoreCourse" data-id="${c.id}">Restore course</button>`:''}</div></div>
     ${stats}</div>
@@ -517,7 +523,7 @@ function movesPanel(open){
 }
 function vDash(){
   const cs={};STAGES.forEach(([k])=>cs[k]=0);S.courses.forEach(c=>{if(stage(c)!=='disc')cs.all++;cs[stage(c)]++});
-  const open=S.tickets.filter(t=>t.status!==CLOSED), overdue=S.tickets.filter(isOverdue), notEsc=overdue.filter(t=>t.status==='New'), noFix=overdue.filter(t=>t.status!=='New'), missed=open.filter(etaMissed);
+  const open=S.tickets.filter(t=>t.status!==CLOSED), overdue=S.tickets.filter(isOverdue), lateAud=S.courses.filter(auditLate), notEsc=overdue.filter(t=>t.status==='New'), noFix=overdue.filter(t=>t.status!=='New'), missed=open.filter(etaMissed);
   const tkLinks=(l,k)=>{const all=listOpen.has(k);return l.slice(0,all?l.length:LIST_MAX).map(t=>`<button class="link" data-a="open" data-id="${t.courseId}">${t.id}</button>`).join(', ')+moreBtn(l.length,k)};
   const catCounts=CATS.map(c=>[c,open.filter(t=>t.category===c).length]).filter(x=>x[1]);
   const maxC=Math.max(1,...catCounts.map(x=>x[1]));
@@ -532,8 +538,9 @@ function vDash(){
   const inR=S.logs.filter(l=>l.ts>=from&&l.ts<to+DAY), cnt=a=>inR.filter(l=>l.action===a).length;
   return `<div class="head"><h2>Dashboard</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-a="samples">${S.courses.some(c=>c.sample)?'Remove 7-day samples':'Add 7-day samples'}</button><button class="btn sm" data-a="reset">Clear all data</button></div></div>
   <span class="sec-label">Courses</span>
-  <div class="metric hero" style="--tone:var(--accent)"><button class="hero-link" data-a="dashGo" data-id="c:all"><b>${cs.all}</b><span>Active courses</span></button>${foldBtn('courses')}</div>
+  <div class="metric hero" style="--tone:var(--accent)"><button class="hero-link" data-a="dashGo" data-id="c:all"><b>${cs.all}</b><span>Active courses</span></button><small class="hero-sla${lateAud.length?' bad':''}">${lateAud.length} not audited in 7d</small>${foldBtn('courses')}</div>
   <div class="fold-box${fold.courses?' shut':''}" id="fold-courses"><div class="metrics">${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to revalidate','--pv','verify')}${m(cs.audit,'Pending audit','--warn','audit')}</div></div>
+  ${lateAud.length?`<div class="alert"><span>⚠</span><div><b>${lateAud.length} course${lateAud.length>1?'s':''} not audited within 7 days.</b> ${lateAud.slice(0,listOpen.has('lateAud')?lateAud.length:LIST_MAX).map(c=>`<button class="link" data-a="open" data-id="${c.id}">${esc(c.code)}</button>`).join(', ')}${moreBtn(lateAud.length,'lateAud')}</div></div>`:''}
   ${notEsc.length?`<div class="alert"><span>⚠</span><div><b>${notEsc.length} ticket${notEsc.length>1?'s':''} not escalated within 7 days.</b> SELM and Auditor groups notified: ${tkLinks(notEsc,'notEsc')}</div></div>`:''}
   ${noFix.length?`<div class="alert"><span>⚠</span><div><b>${noFix.length} ticket${noFix.length>1?'s':''} with no fix date 7 days after escalation.</b> SELM and Auditor groups notified: ${tkLinks(noFix,'noFix')}</div></div>`:''}
   ${missed.length?`<div class="alert"><span>⚠</span><div><b>${missed.length} ticket${missed.length>1?'s':''} past the fix date.</b> ${tkLinks(missed,'missed')}</div></div>`:''}
@@ -647,6 +654,10 @@ function addSamples(){const now=Date.now(),ago=d=>now-d*DAY,price=299;
       const at=(d,actor,action,detail)=>log({ts:ago(d),actor,courseId:c.id,ticketId:t.id,action,detail});
       if(x.esc)at(x.esc,x.by,'Escalated','');
       (x.moves||[]).forEach(m=>{at(m.d,x.by,'Fix date changed',`${week(ago(m.from))} → ${week(ago(m.to))} (${fmtD(ago(m.to))})`);at(m.d,x.by,'Note added',m.note);t.notes.push({ts:ago(m.d),by:x.by,text:m.note})})})};
+  // waiting for their first audit: one past the 7 days, one still inside them
+  [['SAMPLE-104','Sample: not audited yet',10],['SAMPLE-105','Sample: added recently',2]].forEach(([code,name,d])=>{
+    const c={id:'C'+S.seq.c++,sample:true,code,name,type:'ILT',price:null,audience:'',health:'Pending Audit',auditorStatus:'Pending',auditCount:0,lastAudited:null,lastAuditor:null,lockedBy:null,lockedAt:null,cycleAuditId:null,createdAt:ago(d)};
+    S.courses.push(c);log({ts:ago(d),actor:'Rick',courseId:c.id,action:'Course registered',detail:'Manual entry'})});
   addCourse('SAMPLE-101','Sample: not escalated yet',12,[
     {cat:'Pricing',desc:'Price in the catalog is out of date',status:'New',raised:12},
     {cat:'Content',desc:'Lab guide link is broken',status:'New',raised:9},
@@ -747,7 +758,7 @@ const A={
   // sample courses show every SLA state; they sit beside real data and come out again on their own
   toggleList(k){listOpen.has(k)?listOpen.delete(k):listOpen.add(k);render()},
   samples(){const had=S.courses.some(c=>c.sample);had?removeSamples():addSamples();save();render();
-    toast(had?'7-day samples removed':'7-day samples added · 3 courses, 7 tickets')},
+    toast(had?'7-day samples removed':'7-day samples added · 5 courses, 7 tickets')},
   doReset(){fresh();draft=null;closeOv();go('courses');toast('All data cleared')},
   startAudit(id,re){const c=course(id);c.lockedBy=user.name;c.lockedAt=Date.now();if(!re)c.auditorStatus='In Progress';
     const last=re?S.audits.filter(a=>a.courseId===id&&a.checklist?.length===8).sort((a,b)=>b.date-a.date)[0]?.checklist:null;
