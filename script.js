@@ -19,7 +19,7 @@ const WORKING=['Escalated','In Progress','Retest Failed'];
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const STAGES=[['all','All'],['audit','Pending audit'],['issues','Unhealthy'],['verify','Ready to revalidate'],['healthy','Healthy'],['disc','Discontinued']];
 
-let S, view={name:'dashboard'}, user=USERS[0], filter='all', myF=false, catFilter='', tkF='', auditedF='', openRecs=new Set(), rejecting=null, search='', histQ='', rptFrom, rptTo, draft=null, page=1, rowTotal=0;
+let S, view={name:'dashboard'}, user=null, filter='all', myF=false, catFilter='', tkF='', auditedF='', openRecs=new Set(), rejecting=null, search='', histQ='', rptFrom, rptTo, draft=null, page=1, rowTotal=0;
 
 /* ---------- helpers ---------- */
 const $=s=>document.querySelector(s);
@@ -56,8 +56,12 @@ const isAud=()=>user.role==='Auditor', isSelm=()=>user.role==='SELM', isOwner=()
 // a ticket belongs to the SELM who escalated it; other SELMs can only view it
 const mine=t=>!t.escalatedBy||t.escalatedBy===user.name;
 // active courses that look like the same one: same code, or the same name ignoring case and extra spaces
-const normName=s=>String(s||'').trim().replace(/\s+/g,' ').toLowerCase();
-const sameCourses=c=>S.courses.filter(x=>x.id!==c.id&&x.health!=='Discontinued'&&(x.code.toLowerCase()===c.code.toLowerCase()||normName(x.name)===normName(c.name)));
+const INVISIBLE=/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u00AD\u200B-\u200F\u2060-\u2064\uFEFF]/g;
+const normName=s=>String(s||'').replace(INVISIBLE,'').trim().replace(/\s+/g,' ').toLowerCase();
+// a course code copied from elsewhere can carry hidden characters, odd dashes or extra spaces; these must not make it look like a new code
+const cleanCode=v=>String(v??'').replace(INVISIBLE,'').normalize('NFKC').replace(/[\u2010-\u2015\u2212]/g,'-').replace(/\s+/g,' ').trim();
+const codeKey=v=>cleanCode(v).toLowerCase();
+const sameCourses=c=>S.courses.filter(x=>x.id!==c.id&&x.health!=='Discontinued'&&(codeKey(x.code)===codeKey(c.code)||normName(x.name)===normName(c.name)));
 const readyToVerify=c=>{const o=openOf(c.id);return o.length>0&&o.every(t=>t.status===PV_RES||t.status===PV_DIS)};
 
 function stage(c){
@@ -95,12 +99,24 @@ function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
 function load(){try{let v=localStorage.getItem(KEY);if(!v)return null;
   for(const [o,n] of Object.entries(OLD_NAMES))v=v.split(JSON.stringify(o)).join(JSON.stringify(n));
   return JSON.parse(v)}catch(e){return null}}
-function fresh(){S={courses:[],audits:[],tickets:[],logs:[],seq:{t:1001,a:1,c:1,l:1}};save()}
+function fresh(){S={courses:[],audits:[],tickets:[],logs:[],imports:[],seq:{t:1001,a:1,c:1,l:1}};save()}
 
 /* ---------- shell ---------- */
 let openHist=new Set(), openEdits=new Set(); // courses whose older audits are unfolded; audits whose criteria edits are listed
 let animTree=false, animatedFor=null, enterAnim=true, rowAnim=true, flashId=null, editingT=null; // editingT: ticket whose SELM form is open
+// demo sign-in: choose a user, no password. A real sign-in belongs on the server
+const LOGIN_KEY='course-audit-demo-login';
+function vLogin(){return `<form class="login" id="loginForm" novalidate>
+  <div class="login-h"><h1>Course Audit Central</h1><p class="muted">Sign in to continue</p></div>
+  <fieldset class="login-users"><legend>Choose your account</legend>
+    ${USERS.map(u=>`<label class="login-user"><input type="radio" name="loginUser" value="${u.id}"><span class="login-name">${esc(u.name)}</span><span class="login-role">${esc(u.role)}</span></label>`).join('')}</fieldset>
+  <span class="err" id="loginErr"></span>
+  <button type="submit" class="btn primary login-go">Sign in</button>
+  <p class="muted small login-note">Demo sign-in: no password is needed, and it does not protect the data.</p></form>`}
 function render(){
+  document.body.classList.toggle('signed-out',!user);
+  if(!user){$('#who').innerHTML='';$('#tabs').innerHTML='';$('#view').innerHTML=vLogin();return}
+  $('#who').innerHTML=`<span class="who-me"><b>${esc(user.name)}</b><span>${esc(user.role)}</span></span><button class="btn sm" data-a="signOut">Sign out</button>`;
   if(editingT&&mine(ticket(editingT)))stashForm(editingT);
   if(view.name==='course'){animTree=animatedFor!==view.id;animatedFor=view.id}else{animTree=false;animatedFor=null}
   const cur=view.name==='course'?'courses':view.name==='auditor'?'team':view.name;
@@ -150,7 +166,7 @@ function vCourses(){
   S.courses.forEach(c=>{if(stage(c)!=='disc')counts.all++;counts[stage(c)]++});
   const canAdd=isAud()||isOwner(), myN=S.tickets.filter(t=>t.status!==CLOSED&&t.escalatedBy===user.name).length;
   return `<div class="head"><h2>Courses</h2>${canAdd?`<div class="imp-dl"><button class="btn" data-a="importOpen">Import</button><button class="btn primary" data-a="addCourse">+ Add course</button></div>`:''}</div>
-  <div class="toolbar"><div class="chips-bar">${STAGES.map(([k,l])=>`<button class="fchip${k==='disc'?' sep':''}" data-a="filter" data-id="${k}" aria-pressed="${filter===k}">${l} <b>${counts[k]}</b></button>`).join('')}
+  ${impBanner()}<div class="toolbar"><div class="chips-bar">${STAGES.map(([k,l])=>`<button class="fchip${k==='disc'?' sep':''}" data-a="filter" data-id="${k}" aria-pressed="${filter===k}">${l} <b>${counts[k]}</b></button>`).join('')}
     ${isSelm()?`<button class="fchip mine" data-a="toggleMine" aria-pressed="${myF}">My tickets <b>${myN}</b></button>`:''}</div>
     </div>
   <div class="tk-legend" role="group" aria-label="Highlight tickets"><span class="lbl">Highlight tickets</span>${TK_OPTS.map(([v,l])=>`<button class="lchip" data-a="tkHl" data-id="${v}" aria-pressed="${tkF===v}">${v==='closed'?'<span class="dot chk">✓</span>':`<span class="dot ${tone(v==='verify'?PV_RES:v)}"></span>`}${l} <b>${tkCount(v)}</b></button>`).join('')}</div>
@@ -709,9 +725,16 @@ const IMP_NEW=['Course Code','Course Name','Type'];
 const IMP_OLD=[...IMP_NEW,'Course Status','Docebo Price','Currency','Audience',...CRITERIA,'Audit Owner','Audit Date','Audit Note','Issue','Category'];
 const IMP_COLS={new:IMP_NEW,old:IMP_OLD};
 const IMP_SHOW=100;
-let imp=null, xlsxLoad=null;
+let imp=null, xlsxLoad=null, lastImp=null;
+const IMP_REPEAT=IMP_OLD.filter(h=>!['Course Code','Issue','Category'].includes(h));
+function impSame(h,v){
+  if(h==='Type')return impType(v)||impKey(v);
+  if(h==='Docebo Price')return String(toPrice(v));
+  if(h==='Audience')return audList(v).map(impKey).sort().join();
+  if(h==='Audit Date')return String(impDate(v));
+  return impKey(v)}
 const impKey=s=>String(s??'').toLowerCase().replace(/[^a-z0-9]/g,'');
-const impText=v=>String(v??'').trim();
+const impText=v=>String(v??'').replace(INVISIBLE,'').trim();
 function impType(v){const k=impKey(v);
   if(k==='learningplan'||k==='elearning')return 'Learning Plan'; // the old sheet's E-Learning is Learning Plan here
   if(k==='ilt')return 'ILT';
@@ -721,9 +744,8 @@ function impAnswer(v,i){const k=impText(v).toLowerCase(),a=k==='yes'?'Yes':k==='
 function impDate(v){
   if(typeof v==='number'&&window.XLSX){const d=XLSX.SSF.parse_date_code(v);return d?new Date(d.y,d.m-1,d.d).getTime():NaN}
   const s=impText(v);let m;
-  if(m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))var y=+m[1],mo=+m[2],d=+m[3];
-  else if(m=s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/))var y=+m[3],mo=+m[1],d=+m[2];
-  else return NaN;
+  if(!(m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)))return NaN;
+  const y=+m[1],mo=+m[2],d=+m[3];
   const t=new Date(y,mo-1,d);return t.getMonth()===mo-1&&t.getDate()===d?t.getTime():NaN}
 function parseCsv(text){const rows=[];let row=[],cell='',q=false;text=text.replace(/^\uFEFF/,'');
   for(let i=0;i<text.length;i++){const c=text[i];
@@ -750,18 +772,18 @@ function checkImport(kind,rows){
   if(kind==='new'&&CRITERIA.some(h=>impKey(h) in col))return {fatal:'This file has audit columns. Use Import existing courses for it.'};
   if(missing.length)return {fatal:`This file doesn't match the template. Missing: ${missing.join(', ')}.`};
   const get=(r,h)=>r[col[impKey(h)]];
-  const groups=new Map(),order=[],ready=[],skipped=[];
+  const groups=new Map(),order=[],ready=[],skipped=[],names=new Map();
   rows.slice(headAt+1).forEach((r,i)=>{if(!r.some(v=>impText(v)))return;
-    const row=headAt+i+2,code=impText(get(r,'Course Code'));
+    const row=headAt+i+2,code=cleanCode(get(r,'Course Code'));
     if(!code)return skipped.push({row,code:'—',why:'Course code is missing.'});
     const k=code.toLowerCase();
     if(!groups.has(k)){groups.set(k,[]);order.push(k)}
     groups.get(k).push({row,r})});
   for(const k of order){const g=groups.get(k),first=g[0].r,row=g[0].row,why=[];
-    const code=impText(get(first,'Course Code')),name=impText(get(first,'Course Name')),type=impType(get(first,'Type'));
+    const code=cleanCode(get(first,'Course Code')),name=impText(get(first,'Course Name')),type=impType(get(first,'Type'));
     if(!name)why.push('Course name is missing.');
     if(!type)why.push(`Type must be ${COURSE_TYPES.join(', ')}.`);
-    if(S.courses.some(c=>c.code.toLowerCase()===k))why.push('Already in the masterlist.');
+    if(S.courses.some(c=>codeKey(c.code)===k))why.push('Already in the masterlist.');
     const x={code,name,type,row,warn:S.courses.find(c=>normName(c.name)===normName(name))?.code||''};
     if(kind==='new'){if(g.length>1)skipped.push(...g.slice(1).map(o=>({row:o.row,code,why:'Same course code appears earlier in this file.'})))}
     else{
@@ -782,70 +804,85 @@ function checkImport(kind,rows){
       const auditor=impText(get(first,'Audit Owner'));if(!auditor)why.push('Audit owner is missing.');
       const raw=get(first,'Audit Date'),date=impDate(raw);
       if(!impText(raw))why.push('Audit date is missing.');
-      else if(Number.isNaN(date))why.push('Audit date must look like 2026-10-28.');
+      else if(Number.isNaN(date))why.push('Audit date must be written as YYYY-MM-DD, like 2026-10-28.');
       else if(date>dayStart(Date.now()))why.push("Audit date can't be in the future.");
       const note=impText(get(first,'Audit Note'));
       if(isDisc&&!note)why.push('A discontinued course needs its reason in Audit Note.');
-      const issues=[];
+      const issues=[],seenIssues=new Set();let dupes=0;
       g.forEach((o,n)=>{const desc=impText(get(o.r,'Issue')),rawCat=impText(get(o.r,'Category')),cat=CATS.find(c=>c.toLowerCase()===rawCat.toLowerCase());
+        if(n){const diff=IMP_REPEAT.filter(h=>impText(get(o.r,h))&&impSame(h,get(o.r,h))!==impSame(h,get(first,h)));
+          if(diff.length)why.push(`Row ${o.row} uses the same course code as row ${row} but has a different ${diff.join(', ')}.`)}
         if(!desc&&!rawCat){if(n)why.push(`Row ${o.row} repeats this course code with no issue.`);return}
         if(isDisc)return why.push(`Row ${o.row}: a discontinued course opens no tickets. Move this to Audit Note.`);
         if(!desc)why.push(`Row ${o.row}: issue description is missing.`);
         if(!cat)why.push(`Row ${o.row}: category must be one of ${CATS.join(', ')}.`);
-        issues.push({cat:cat||rawCat,desc})});
+        const issueKey=`${impKey(rawCat)}|${normName(desc)}`;
+        if(seenIssues.has(issueKey)){dupes++;return}
+        seenIssues.add(issueKey);issues.push({cat:cat||rawCat,desc})});
       if(!isDisc&&anyNo&&!issues.length)why.push('A No needs at least one issue.');
       if(!isDisc&&!anyNo&&issues.length)why.push('It has an issue but no criterion is marked No.');
-      Object.assign(x,{disc:isDisc,price:Number.isNaN(price)?null:price,currency,audience:aud.map(a=>a.hit).filter(Boolean).join(', '),crit:crit.map(v=>v||(isDisc?'N/A':'Yes')),auditor,date,note,issues,failed:anyNo&&!isDisc,anyNo})}
-    if(why.length)skipped.push({row,code,why:why.join(' ')});else ready.push(x)}
+      Object.assign(x,{disc:isDisc,price:Number.isNaN(price)?null:price,currency,audience:aud.map(a=>a.hit).filter(Boolean).join(', '),crit:crit.map(v=>v||(isDisc?'N/A':'Yes')),auditor,date,note,issues,dupes,failed:anyNo&&!isDisc,anyNo})}
+    if(why.length){skipped.push({row,code,why:why.join(' ')});continue}
+    const nameKey=normName(name);if(!x.warn)x.warn=names.get(nameKey)||'';if(!names.has(nameKey))names.set(nameKey,code);
+    ready.push(x)}
   skipped.sort((a,b)=>a.row-b.row);
   return {ready,skipped}}
 function impChooser(){openModal(`<div class="ov-h"><h3>Import courses</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
   <div class="ov-b"><p class="muted" style="margin:0">Which courses are in your file?</p>
     <button class="imp-kind" data-a="impKind" data-id="new"><b>New courses</b><span>Not audited yet. They go to Pending audit and the 7-day clock starts.</span></button>
-    <button class="imp-kind" data-a="impKind" data-id="old"><b>Existing courses</b><span>Already audited. Their last result and open issues come with them.</span></button></div>
+    <button class="imp-kind" data-a="impKind" data-id="old"><b>Existing courses</b><span>Already audited. Their last result and open issues come with them.</span></button>${impHistLink()}</div>
   <div class="ov-f"><button class="btn" data-a="close">Cancel</button></div>`)}
 function impUpload(kind,msg){imp={kind};const isNew=kind==='new';
   openModal(`<div class="ov-h"><h3>Import ${isNew?'new':'existing'} courses</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
-  <div class="ov-b"><div class="imp-steps"><b>1.</b> Fill in the template. Keep its column names.<br><b>2.</b> Upload it. You can check everything before anything is added.</div>
+  <div class="ov-b"><div class="imp-steps"><b>1.</b> Fill in the template. Keep its column names.<br><b>2.</b> Upload it. If any row has a problem, nothing is imported until the file is fixed.</div>
     <div class="imp-dl"><button class="btn sm" data-a="impFile" data-id="${kind}:template">Download template</button><button class="btn sm" data-a="impFile" data-id="${kind}:sample">Download sample file</button></div>
     <p class="muted small" style="margin:0">${isNew?'Columns: Course Code, Course Name, Type.':'One row per course. A course with several issues gets one more row per issue, with the same Course Code. Columns: course details and status, the 8 criteria, Audit Owner, Audit Date, Audit Note, Issue, Category.'}</p>
     <label class="imp-drop"><input type="file" id="impFile" accept=".xlsx,.csv" aria-label="Choose an Excel or CSV file"><b>Choose a file</b><span>or drop it here · .xlsx or .csv</span></label>
-    <span class="err" id="impErr">${esc(msg||'')}</span></div>
+    <span class="err" id="impErr">${esc(msg||'')}</span>${impHistLink()}</div>
   <div class="ov-f">${isAud()?`<button class="btn" data-a="importOpen">Back</button>`:`<button class="btn" data-a="close">Cancel</button>`}</div>`)}
-function impPreview(){const {kind,file,ready,skipped}=imp,n=ready.length,isNew=kind==='new';
+function impPreview(){const {kind,file,ready,skipped}=imp,n=ready.length,isNew=kind==='new',blocked=skipped.length>0;
+  const more=(len)=>len>IMP_SHOW?`<p class="muted small" style="margin:0">Showing the first ${IMP_SHOW} of ${len}.</p>`:'';
+  // one wrong row stops the whole file, so nothing is half imported
+  if(blocked){
+    openModal(`<div class="ov-h"><h3>Can't import ${esc(file)}</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+    <div class="ov-b"><p class="imp-stop">${skipped.length} problem${skipped.length>1?'s':''} found. Nothing was imported. Fix ${skipped.length>1?'them':'it'} in the file, then upload it again.</p>
+      <div class="imp-sec"><div class="tbl-wrap"><table class="imp-tbl"><thead><tr><th>Row</th><th>Course</th><th>Problem</th></tr></thead><tbody>${skipped.slice(0,IMP_SHOW).map(s=>`<tr><td>${s.row}</td><td>${esc(s.code)}</td><td>${esc(s.why)}</td></tr>`).join('')}</tbody></table></div>${more(skipped.length)}</div></div>
+    <div class="ov-f"><button class="btn" data-a="close">Close</button><button class="btn primary" data-a="impAgain">Choose another file</button></div>`);
+    $('.modal').classList.add('imp-wide');return}
   const failed=ready.filter(x=>x.failed),gone=ready.filter(x=>x.disc).length,pass=n-failed.length-gone,tix=failed.reduce((s,x)=>s+x.issues.length,0);
   const facts=isNew?`<div class="imp-fact"><b>${n}</b><span>Pending audit</span></div>`
     :`<div class="imp-fact"><b>${pass}</b><span>Healthy</span></div><div class="imp-fact"><b>${failed.length}</b><span>Unhealthy</span></div>${gone?`<div class="imp-fact"><b>${gone}</b><span>Discontinued</span></div>`:''}<div class="imp-fact"><b>${tix}</b><span>Tickets to open</span></div>`;
-  const more=(len)=>len>IMP_SHOW?`<p class="muted small" style="margin:0">Showing the first ${IMP_SHOW} of ${len}.</p>`:'';
   const result=x=>isNew?pill('Pending Audit'):pill(x.disc?'Discontinued':x.failed?'Unhealthy':'Healthy')+(x.failed?` <span class="muted small">${x.issues.length} issue${x.issues.length>1?'s':''}</span>`:'');
+  // what deserves a look comes first, so it isn't lost past the first rows of a long file
+  const warnsOf=x=>[x.warn&&`Same name as ${x.warn}`,x.dupes&&`Same issue listed more than once. One ticket opens.`].filter(Boolean);
+  const warned=ready.filter(x=>warnsOf(x).length),shown=[...warned,...ready.filter(x=>!warnsOf(x).length)];
   openModal(`<div class="ov-h"><h3>Check ${esc(file)}</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
-  <div class="ov-b"><div class="imp-facts">${facts}<div class="imp-fact${skipped.length?' bad':''}"><b>${skipped.length}</b><span>Skipped</span></div></div>
-    ${skipped.length?`<div class="imp-sec"><h4>Skipped · fix these in the file and import again</h4><div class="tbl-wrap"><table class="imp-tbl"><thead><tr><th>Row</th><th>Course</th><th>Reason</th></tr></thead><tbody>${skipped.slice(0,IMP_SHOW).map(s=>`<tr><td>${s.row}</td><td>${esc(s.code)}</td><td>${esc(s.why)}</td></tr>`).join('')}</tbody></table></div>${more(skipped.length)}</div>`:''}
-    ${n?`<div class="imp-sec"><h4>Ready to import</h4><div class="tbl-wrap"><table class="imp-tbl"><thead><tr><th>Course</th><th>Name</th><th>Type</th><th>Result</th></tr></thead><tbody>${ready.slice(0,IMP_SHOW).map(x=>`<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${x.warn?`<div class="warn-line">Same name as ${esc(x.warn)}</div>`:''}</td><td>${esc(x.type)}</td><td>${result(x)}</td></tr>`).join('')}</tbody></table></div>${more(n)}</div>`:'<p style="margin:0">Nothing in this file can be imported yet.</p>'}
+  <div class="ov-b"><div class="imp-facts">${facts}</div>
+    ${n?`<div class="imp-sec"><h4>Ready to import</h4>${warned.length?`<p class="warn-line" style="margin:0">${warned.length} course${warned.length>1?'s have':' has'} a warning, listed first. ${warned.length>1?'They':'It'} can still be imported.</p>`:''}<div class="tbl-wrap"><table class="imp-tbl"><thead><tr><th>Course</th><th>Name</th><th>Type</th><th>Result</th></tr></thead><tbody>${shown.slice(0,IMP_SHOW).map(x=>`<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${warnsOf(x).map(w=>`<div class="warn-line">${esc(w)}</div>`).join('')}</td><td>${esc(x.type)}</td><td>${result(x)}</td></tr>`).join('')}</tbody></table></div>${more(n)}</div>`:'<p style="margin:0">This file has no courses.</p>'}
     <span class="err" id="impErr"></span></div>
   <div class="ov-f"><button class="btn" data-a="impAgain">Choose another file</button><button class="btn primary" data-a="impSave"${n?'':' disabled'}>Import ${n} course${n===1?'':'s'}</button></div>`);
   $('.modal').classList.add('imp-wide')}
-function importCourse(x,kind,file){
+function importCourse(x,kind,file,bid){
   const c={id:'C'+S.seq.c++,code:x.code,name:x.name,type:x.type,price:null,audience:'',health:'Pending Audit',auditorStatus:'Pending',auditCount:0,lastAudited:null,lastAuditor:null,lockedBy:null,lockedAt:null,cycleAuditId:null,createdAt:Date.now()};
-  S.courses.push(c);log({courseId:c.id,action:'Course registered',detail:`Imported from ${file}`});
+  c.importId=bid;S.courses.push(c);log({importId:bid,courseId:c.id,action:'Course registered',detail:`Imported from ${file}`});
   if(kind==='new')return;
   c.price=x.price;c.currency=x.currency;c.audience=x.audience;c.lastAudited=x.date;c.lastAuditor=x.auditor;
   const a={id:'A'+S.seq.a++,courseId:c.id,date:x.date,result:x.anyNo?'Failed':'Passed',auditor:x.auditor,checklist:x.crit,price:x.price,currency:x.currency,audience:x.audience,issues:x.issues.map(i=>({...i})),note:`Imported from file${x.note?` · ${x.note}`:''}`};
   S.audits.push(a);
   if(x.disc){
     c.health='Discontinued';c.auditorStatus='Completed';
-    log({ts:x.date,actor:x.auditor,courseId:c.id,action:'Course discontinued',detail:x.note});
+    log({importId:bid,ts:x.date,actor:x.auditor,courseId:c.id,action:'Course discontinued',detail:x.note});
   }else if(x.failed){
     // Raised keeps the audit date; the 7 days to escalate start today, when the SELMs first see the ticket
     const made=x.issues.map(i=>{const t={id:'TKT-'+S.seq.t++,courseId:c.id,auditId:a.id,category:i.cat,detail:i.desc,status:'New',createdAt:x.date,slaStart:Date.now(),createdBy:x.auditor,escalatedAt:null,escalatedBy:null,fixDate:null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};S.tickets.push(t);return t});
     c.health='Unhealthy';c.auditorStatus='In Progress';c.cycleAuditId=a.id;
-    log({ts:x.date,actor:x.auditor,courseId:c.id,ticketIds:made.map(t=>t.id),action:'Audit failed',detail:`${made.length} ticket(s) created: ${made.map(t=>`${t.id} ${t.category}`).join(', ')} · imported`});
+    log({importId:bid,ts:x.date,actor:x.auditor,courseId:c.id,ticketIds:made.map(t=>t.id),action:'Audit failed',detail:`${made.length} ticket(s) created: ${made.map(t=>`${t.id} ${t.category}`).join(', ')} · imported`});
   }else{
     c.health='Healthy';c.auditorStatus='Completed';c.auditCount=1;
-    log({ts:x.date,actor:x.auditor,courseId:c.id,action:'Audit passed',detail:'Iteration 1 · imported'})}}
+    log({importId:bid,ts:x.date,actor:x.auditor,courseId:c.id,action:'Audit passed',detail:'Iteration 1 · imported'})}}
 function impSampleRows(kind){
   const ymd=d=>toInput(Date.now()-d*DAY);
-  if(kind==='new')return [['DEMO-N101','Storage Fundamentals','Learning Plan'],['DEMO-N102','Networking Essentials','On-Demand'],['DEMO-N103','Server Administration Workshop','ILT'],['DEMO-N104','Cloud Basics','On-Demand'],['DEMO-N105','Data Protection Overview','Learning Plan'],['DEMO-N101','Storage Fundamentals (entered twice)','Learning Plan'],['DEMO-N106','Security Awareness','Webinar']];
+  if(kind==='new')return [['DEMO-N101','Storage Fundamentals','Learning Plan'],['DEMO-N102','Networking Essentials','On-Demand'],['DEMO-N103','Server Administration Workshop','ILT'],['DEMO-N104','Cloud Basics','On-Demand'],['DEMO-N105','Data Protection Overview','Learning Plan']];
   const y=(...no)=>CRITERIA.map((_,i)=>no.includes(i)?'No':'Yes'),row=(code,name,type,status,price,cur,aud,crit,who,d,note='',issue='',cat='')=>[code,name,type,status,price,cur,aud,...crit,who,ymd(d),note,issue,cat];
   const more=(code,issue,cat)=>[code,'','','','','','',...CRITERIA.map(()=>''),'','','',issue,cat];
   return [row('DEMO-E201','Hyperconverged Infrastructure Overview','Learning Plan','Active',0,'','Partner',y(),'Rick',5),
@@ -854,7 +891,6 @@ function impSampleRows(kind){
     row('DEMO-E204','Virtualization Administration','ILT','Active',7800,'CNY','Partner',y(1),'Calvin',12,'','Course description PDF will not open','CD PDF'),
     row('DEMO-E205','Modern Data Center Foundations','Learning Plan','Active',100,'USD','Customer',y(3,7),'Rick',3,'','Launch link goes to a retired page','Course Setup'),
     more('DEMO-E205','Completion is not recorded after the final module','IT issue'),
-    row('DEMO-E206','Edge Computing Essentials','On-Demand','Active',0,'','Partner',y(2),'Calvin',2),
     row('DEMO-E207','Legacy Storage Administration','ILT','Discontinued',480,'USD','Partner',y(0,1,2,3,4,5,6,7),'Rick',20,'Replaced by DEMO-E201')]}
 async function impDownload(kind,what){
   const name=`${what==='sample'?'sample':'template'}-${kind==='new'?'new':'existing'}-courses.xlsx`,aoa=[IMP_COLS[kind],...(what==='sample'?impSampleRows(kind):[])];
@@ -877,6 +913,15 @@ async function impRead(input){const file=input.files[0],kind=imp?.kind;if(!file|
   if(res.fatal)return fail(res.fatal);
   imp={kind,file:file.name,...res};impPreview()}
 
+// a whole import can be taken back until someone has worked on one of its courses, so nobody's work is removed by accident
+const canUndoImp=b=>isAud()||b.by===user.name;
+function impWorked(id){const worked=new Set(S.logs.filter(l=>!l.importId).map(l=>l.courseId));
+  return S.courses.filter(c=>c.importId===id&&(c.lockedBy||worked.has(c.id)))}
+const impHistLink=()=>S.imports.length?`<button class="link small imp-hist" data-a="impHistory">Import history (${S.imports.length})</button>`:'';
+function impBanner(){const b=S.imports.find(x=>x.id===lastImp);if(!b||b.undoneAt||!canUndoImp(b))return '';
+  return `<div class="imp-banner" id="impBanner"><span>${b.count} course${b.count===1?'':'s'} imported from <b>${esc(b.file)}</b>.</span><button class="link" data-a="impUndo" data-id="${b.id}">Undo import</button><button class="x" data-a="dismissImp" aria-label="Dismiss">×</button></div>`}
+function impHistoryRows(){return [...S.imports].reverse().slice(0,20).map(b=>`<tr><td>${esc(b.file)}</td><td>${b.kind==='new'?'New':'Existing'}</td><td>${b.count}</td><td>${esc(b.by)}<div class="muted small">${fmtDT(b.ts)}</div></td><td>${b.undoneAt?`<span class="muted small">Undone by ${esc(b.undoneBy)}<br>${fmtDT(b.undoneAt)}</span>`:canUndoImp(b)?`<button class="btn sm" data-a="impUndo" data-id="${b.id}">Undo</button>`:'<span class="muted small">—</span>'}</td></tr>`).join('')}
+
 const A={
   go(id){go(id)},
   open(id){go('course',id)},
@@ -885,15 +930,40 @@ const A={
   filter(id){filter=id;refreshRows()},
   leaveAudit(){const next=leaveNext;leaveNext=null;closeOv();draftStart=JSON.stringify(draft);next?.()},
   goFilter(id){if(leaveGuard(()=>A.goFilter(id)))return;filter=id;go('courses')},
+  signIn(){const id=document.querySelector('input[name=loginUser]:checked')?.value;
+    if(!id){$('#loginErr').textContent='Choose an account to sign in.';return}
+    user=USERS.find(u=>u.id===id);try{sessionStorage.setItem(LOGIN_KEY,id)}catch(e){}
+    view={name:'dashboard'};enterAnim=true;render();window.scrollTo(0,0)},
+  signOut(){if(leaveGuard(()=>A.signOut()))return;
+    go('dashboard');closeOv();user=null;lastImp=null;try{sessionStorage.removeItem(LOGIN_KEY)}catch(e){}
+    filter='all';myF=false;catFilter='';tkF='';auditedF='';search='';page=1;render();window.scrollTo(0,0)},
+  impHistory(){openModal(`<div class="ov-h"><h3>Import history</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+    <div class="ov-b"><div class="tbl-wrap"><table class="imp-tbl"><thead><tr><th>File</th><th>Type</th><th>Courses</th><th>Imported by</th><th></th></tr></thead><tbody>${impHistoryRows()}</tbody></table></div></div>
+    <div class="ov-f"><button class="btn" data-a="close">Close</button></div>`);$('.modal').classList.add('imp-wide')},
+  dismissImp(){lastImp=null;$('#impBanner')?.remove()},
+  impUndo(id){const b=S.imports.find(x=>x.id===id);if(!b||b.undoneAt||!canUndoImp(b))return;const busy=impWorked(id);
+    if(busy.length){const codes=busy.slice(0,10).map(c=>esc(c.code)).join(', ');
+      return openModal(`<div class="ov-h"><h3>Can't undo this import</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+      <div class="ov-b"><p style="margin:0">${busy.length} course${busy.length>1?'s have':' has'} been worked on since it was imported, so undoing would lose that work. Nothing was changed.</p><p class="muted small" style="margin:0">${codes}${busy.length>10?` and ${busy.length-10} more`:''}</p></div>
+      <div class="ov-f"><button class="btn" data-a="close">Close</button></div>`)}
+    const ids=new Set(S.courses.filter(c=>c.importId===id).map(c=>c.id)),tix=S.tickets.filter(t=>ids.has(t.courseId)).length;
+    openModal(`<div class="ov-h"><h3>Undo this import?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+    <div class="ov-b"><p style="margin:0">${esc(b.file)}</p><p style="margin:0">This removes ${ids.size} course${ids.size===1?'':'s'}${tix?`, ${tix} ticket${tix===1?'':'s'}`:''} and their audit records. It can't be reversed, but you can import the file again.</p></div>
+    <div class="ov-f"><button class="btn" data-a="close">Keep courses</button><button class="btn danger" data-a="doImpUndo" data-id="${id}">Undo import</button></div>`)},
+  doImpUndo(id){const b=S.imports.find(x=>x.id===id);if(!b||b.undoneAt||impWorked(id).length)return closeOv();
+    const ids=new Set(S.courses.filter(c=>c.importId===id).map(c=>c.id));
+    S.courses=S.courses.filter(c=>!ids.has(c.id));S.audits=S.audits.filter(a=>!ids.has(a.courseId));S.tickets=S.tickets.filter(t=>!ids.has(t.courseId));S.logs=S.logs.filter(l=>!ids.has(l.courseId));
+    b.undoneAt=Date.now();b.undoneBy=user.name;if(lastImp===id)lastImp=null;save();closeOv();page=1;go('courses');toast(`Import undone · ${ids.size} course${ids.size===1?'':'s'} removed`)},
   importOpen(){if(!isAud()&&!isOwner())return;imp=null;if(isAud())impChooser();else impUpload('new')},
   impKind(k){if(k==='old'&&!isAud())return;impUpload(k)},
   impFile(id){const [k,w]=id.split(':');impDownload(k,w)},
   impAgain(){impUpload(imp.kind)},
-  impSave(){const {kind,file,ready,skipped}=imp,snap=JSON.stringify(S);
-    ready.forEach(x=>importCourse(x,kind,file));
+  impSave(){const {kind,file,ready,skipped}=imp,snap=JSON.stringify(S);if(skipped.length||!ready.length)return;
+    const bid='I'+Date.now();ready.forEach(x=>importCourse(x,kind,file,bid));
+    S.imports.push({id:bid,file,kind,by:user.name,ts:Date.now(),count:ready.length,undoneAt:null,undoneBy:null});
     try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){if(/quota/i.test(e?.name||'')){S=JSON.parse(snap);$('#impErr').textContent="There isn't enough browser storage for this many courses. Nothing was imported.";return}}
-    closeOv();imp=null;filter='all';search='';catFilter='';tkF='';auditedF='';myF=false;page=1;go('courses');
-    toast(`${ready.length} course${ready.length===1?'':'s'} imported${skipped.length?` · ${skipped.length} skipped`:''}`)},
+    lastImp=bid;closeOv();imp=null;filter='all';search='';catFilter='';tkF='';auditedF='';myF=false;page=1;go('courses');
+    toast(`${ready.length} course${ready.length===1?'':'s'} imported`)},
   addCourse(){openModal(`<form id="addForm" novalidate style="display:contents"><div class="ov-h"><h3>Add a course</h3><button type="button" class="x" data-a="close" aria-label="Close">×</button></div>
     <div class="ov-b"><label class="field"><span class="req">Course code</span><input type="text" id="nCode" placeholder="e.g. ESSTGD04406"></label>
     <label class="field"><span class="req">Course name</span><input type="text" id="nName"></label>
@@ -901,9 +971,9 @@ const A={
     <span class="err" id="nErr"></span></div>
     <div class="ov-f"><button type="button" class="btn" data-a="close">Cancel</button><button type="submit" class="btn primary">Add</button></div></form>`);$('#nCode').focus()},
   saveCourse(){
-    const code=$('#nCode').value.trim(),name=$('#nName').value.trim();
+    const code=cleanCode($('#nCode').value),name=$('#nName').value.trim();
     if(!code||!name){$('#nErr').textContent='Course code and course name are required.';return}
-    if(S.courses.some(c=>c.code.toLowerCase()===code.toLowerCase())){$('#nErr').textContent=`${code} is already in the masterlist.`;return}
+    if(S.courses.some(c=>codeKey(c.code)===codeKey(code))){$('#nErr').textContent=`${code} is already in the masterlist.`;return}
     const c={id:'C'+S.seq.c++,code,name,type:$('#nType').value,price:null,audience:'',health:'Pending Audit',auditorStatus:'Pending',auditCount:0,lastAudited:null,lastAuditor:null,lockedBy:null,lockedAt:null,cycleAuditId:null,createdAt:Date.now()};
     S.courses.push(c);log({courseId:c.id,action:'Course registered',detail:'Manual entry'});save();closeOv();render();toast(`${code} added`)},
   // the course owner keeps the code, name and type right; every change goes in the history
@@ -913,9 +983,9 @@ const A={
     <label class="field"><span>Type</span><select id="eType">${['Learning Plan','ILT','On-Demand'].map(t=>`<option${t===c.type?' selected':''}>${t}</option>`).join('')}</select></label>
     <span class="err" id="eErr"></span></div>
     <div class="ov-f"><button type="button" class="btn" data-a="close">Cancel</button><button type="submit" class="btn primary">Save</button></div></form>`);$('#eCode').focus()},
-  saveEditCourse(id){const c=course(id),code=$('#eCode').value.trim(),name=$('#eName').value.trim(),type=$('#eType').value;
+  saveEditCourse(id){const c=course(id),code=cleanCode($('#eCode').value),name=$('#eName').value.trim(),type=$('#eType').value;
     if(!code||!name){$('#eErr').textContent='Course code and course name are required.';return}
-    if(S.courses.some(x=>x.id!==id&&x.code.toLowerCase()===code.toLowerCase())){$('#eErr').textContent=`${code} is already in the masterlist.`;return}
+    if(S.courses.some(x=>x.id!==id&&codeKey(x.code)===codeKey(code))){$('#eErr').textContent=`${code} is already in the masterlist.`;return}
     const changes=[['Code',c.code,code],['Name',c.name,name],['Type',c.type,type]].filter(x=>x[1]!==x[2]);
     closeOv();if(!changes.length)return toast('No changes to save');
     c.code=code;c.name=name;c.type=type;log({courseId:id,action:'Course info updated',detail:changes.map(([k,a,b])=>`${k}: ${a} → ${b}`).join(' · ')});save();render();toast(`${code} updated`)},
@@ -973,7 +1043,7 @@ const A={
   toggleList(k){listOpen.has(k)?listOpen.delete(k):listOpen.add(k);render()},
   samples(){const had=S.courses.some(c=>c.sample);had?removeSamples():addSamples();save();render();
     toast(had?'7-day samples removed':'7-day samples added · 5 courses, 7 tickets')},
-  doReset(){fresh();draft=null;closeOv();go('courses');toast('All data cleared')},
+  doReset(){fresh();draft=null;lastImp=null;closeOv();go('courses');toast('All data cleared')},
   startAudit(id,re){const c=course(id);c.lockedBy=user.name;c.lockedAt=Date.now();if(!re)c.auditorStatus='In Progress';
     const last=re?S.audits.filter(a=>a.courseId===id&&a.checklist?.length===8).sort((a,b)=>b.date-a.date)[0]?.checklist:null;
     const base=last?last.map(v=>v==='N/A'?'N/A':'Yes'):null;
@@ -1161,7 +1231,7 @@ document.addEventListener('change',e=>{
   if(t.name&&/^c\d$/.test(t.name)){draft.crit[+t.name.slice(1)]=t.value;$('#formErr').textContent='';renderIssues()}
   else if(t.name&&/^e\d$/.test(t.name))t.closest('.crit-row').classList.toggle('no',t.value==='No');
   else if(t.name==='fAud'){draft.aud=[...document.querySelectorAll('input[name=fAud]:checked')].map(x=>x.value);$('#formErr').textContent=''}
-  else if(t.id==='userSel'){if(editingT)stashForm(editingT);user=USERS.find(u=>u.id===t.value);closeOv();render();toast(`Now ${user.name} (${user.role})`)}
+  else if(t.name==='loginUser')$('#loginErr').textContent='';
   else if(t.id==='statusF'){filter=t.value||'all';refreshRows()}
   else if(['catFilter','auditedF'].includes(t.id)){
     ({catFilter:v=>catFilter=v,auditedF:v=>auditedF=v})[t.id](t.value);
@@ -1184,6 +1254,7 @@ document.addEventListener('input',e=>{
 });
 document.addEventListener('submit',e=>{
   if(e.target.id==='auditForm'){e.preventDefault();submitAudit()}
+  else if(e.target.id==='loginForm'){e.preventDefault();A.signIn()}
   else if(e.target.id==='addForm'){e.preventDefault();A.saveCourse()}
   else if(e.target.id==='editForm'){e.preventDefault();A.saveEditCourse(e.target.dataset.id)}
 });
@@ -1191,6 +1262,7 @@ document.addEventListener('submit',e=>{
 /* ---------- boot ---------- */
 $('#overlay').insertAdjacentHTML('beforebegin','<div id="focusHost"></div>');
 S=load(); if(!S||!S.seq)fresh();
+S.imports=S.imports||[];
 // older data stored pricing as free text; keep it only if it reads as a number
 [...S.courses,...S.audits].forEach(x=>{if(typeof x.price==='string'){const p=toPrice(x.price);x.price=Number.isNaN(p)?null:p}});
 // the E-Learning course type is now called Learning Plan
@@ -1204,6 +1276,7 @@ S.courses.forEach(c=>{const a=S.audits.filter(x=>x.courseId===c.id).sort((x,y)=>
   if(a&&(!c.lastAudited||a.date>c.lastAudited)){c.lastAudited=a.date;c.lastAuditor=a.auditor}});
 // an unfinished audit form does not survive a reload, so release its lock
 S.courses.forEach(c=>{if(c.lockedBy){c.lockedBy=null;c.lockedAt=null;if(!openOf(c.id).length&&c.auditorStatus==='In Progress')c.auditorStatus='Pending'}});
-$('#userSel').innerHTML=USERS.map(u=>`<option value="${u.id}">${u.name} · ${u.role}</option>`).join('');
+// a reload in the same tab stays signed in; a new tab starts at the sign-in page
+try{user=USERS.find(u=>u.id===sessionStorage.getItem(LOGIN_KEY))||null}catch(e){user=null}
 render();
 })();

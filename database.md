@@ -1,6 +1,6 @@
 # Database schema
 
-Course Audit Central 以后变成真网站时的数据库设计。现在的 demo 把数据存在浏览器的 localStorage（`courses`、`audits`、`tickets`、`logs`），真网站会把它们拆成下面 9 张表。
+Course Audit Central 以后变成真网站时的数据库设计。现在的 demo 把数据存在浏览器的 localStorage（`courses`、`audits`、`tickets`、`logs`），真网站会把它们拆成下面 10 张表。
 
 ## ER 图
 
@@ -22,6 +22,8 @@ erDiagram
   USERS ||--o{ TICKET_NOTES : writes
   COURSES ||--o{ ACTIVITY_LOGS : logs
   USERS ||--o{ ACTIVITY_LOGS : "acts in"
+  USERS ||--o{ IMPORT_BATCHES : imports
+  IMPORT_BATCHES ||--o{ COURSES : adds
   TICKETS |o--o{ ACTIVITY_LOGS : "records of"
   AUDITS |o--o{ ACTIVITY_LOGS : "edits of"
 
@@ -46,6 +48,7 @@ erDiagram
     datetime DiscontinuedAt
     int DiscontinuedById FK
     string DiscontinueReason
+    int ImportBatchId FK
     datetime CreatedAt
   }
   COURSE_AUDIENCES {
@@ -112,6 +115,17 @@ erDiagram
     int AuditId FK
     string Action
     string Detail
+    int ImportBatchId FK
+  }
+  IMPORT_BATCHES {
+    int Id PK
+    string FileName
+    string Kind
+    int CourseCount
+    int ImportedById FK
+    datetime ImportedAt
+    int UndoneById FK
+    datetime UndoneAt
   }
 ```
 
@@ -173,6 +187,7 @@ erDiagram
 | TICKETS | 每个 issue 一张 ticket | `S.tickets` |
 | TICKET_NOTES | SELM 在 ticket 上留的 note | `ticket.notes` 数组 |
 | ACTIVITY_LOGS | 所有修改记录（谁、什么时候、做了什么） | `S.logs` |
+| IMPORT_BATCHES | 每一次导入：文件名、类型、数量、谁导入、有没有撤销 | `S.imports` |
 
 ## 设计重点
 
@@ -212,7 +227,7 @@ erDiagram
 
 ## 导入课程
 
-Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），先预览，确认后才写入。不需要新表，Action 也沿用下面的值。
+Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），先检查，确认后才写入。只要有一行不对，整个文件都不能导入，要改好再上传，所以不会只导入一半。不需要新表，Action 也沿用下面的值。
 
 | | New courses | Existing courses |
 |---|---|---|
@@ -220,7 +235,10 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 | 模板栏位 | Course Code、Course Name、Type | 前三栏，加 Course Status、Docebo Price、Currency、Audience、8 项 criteria、Audit Owner、Audit Date、Audit Note、Issue、Category，共 20 栏 |
 | 导入后 | `Pending Audit`，等 audit 的 7 天从导入时算 | `Course Status = Discontinued` 就下架；否则有 `No` 是 `Unhealthy` 并开 `New` ticket；都不是就 `Healthy`，`AuditCount = 1` |
 
-- 系统里已有的 Course Code（包括 Discontinued）、文件里重复的 code、资料不合规则的行都跳过，并在预览列出原因；其他行照样导入。
+- 这些都算错误，会挡下整个文件，并列出行号和原因：系统里已有的 Course Code（包括 Discontinued）、文件里重复的 Course Code、资料不合规则的行。
+- Existing 文件里同一个 Course Code 的后续行只能加 issue：其他栏位可以留空或和第一行相同；填了不同的值，就算 Course Code 重复，整个文件不能导入。这是模板唯一允许重复 Course Code 的情况，因为一门课有多个 issue。
+- 同一门课里 Issue 和 Category 都相同的行只开一张 ticket，预览会提示。
+- 课程名称相同（和系统里的或文件里的）只警告，还是可以导入，因为不同 Course Code 可能真的同名。有警告的课程排在预览最前面。
 - Existing 模板一门课一行；多个 issue 就多加一行，写同一个 Course Code，只要填 Issue 和 Category。每个 issue 只有一个 Category。
 - Existing 用的规则和 audit 表单一样：有 `No` 一定要有 issue，没有 `No` 就不能有 issue；没有 `No` 时 8 项都要答；`N/A` 只有前 3 项能用；有 `No` 时空白的存成 `Yes`。Audit Date 不能在未来。
 - 导入的 ticket：`CreatedAt` 是 Audit Date，`SlaStartAt` 是导入当天，escalate 的 7 天从 `SlaStartAt` 算。手动开的 ticket `SlaStartAt` 是空的，从 `CreatedAt` 算。
@@ -228,6 +246,9 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 - Audit Note 存在那次 audit 的备注里，不开 ticket。
 - `Currency` 选填，3 个英文字母；有 Currency 就一定要有 Docebo Price。空的表示资料没写币种。
 - `E-Learning` 导入时改成 `Learning Plan`。
+- Audit Date：Excel 的日期格式可以；文字只接受 `YYYY-MM-DD`，因为 `03/10/2026` 分不出哪个是月。
+- Course Code 比较和保存前都要清理：去掉隐藏字符，全角字符和各种破折号转成一般字符，多个空格合并成一个，头尾空格去掉；比较时不分大小写。Add course、编辑课程和导入都一样。
+- 撤销导入：可以整批撤销，只有 Auditor 或导入的人能做，导入的课程、audit、ticket 和记录全部删除，`IMPORT_BATCHES` 记下 `UndoneById` 和 `UndoneAt`。只要其中一门课导入后有人动过（有 `ImportBatchId` 为空的 `ACTIVITY_LOGS`，或正在 audit），整批都不能撤销。
 - 每门课写一行 `Course registered`，`Detail` 记文件名；Existing 再用 Audit Owner 和 Audit Date 写 `Audit passed` 或 `Audit failed`。
 
 ## ACTIVITY_LOGS.Action 的值

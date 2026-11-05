@@ -68,6 +68,7 @@ Table Courses {
   DiscontinuedAt datetime
   DiscontinuedById int [ref: > Users.Id]
   DiscontinueReason varchar
+  ImportBatchId int [ref: > ImportBatches.Id, note: 'null = added by hand']
   CreatedAt datetime [not null]
 }
 
@@ -157,4 +158,16 @@ Table ActivityLogs {
   AuditId int [ref: > Audits.Id, note: 'set for criteria edits']
   Action varchar [not null, note: 'see the Action list in database.md']
   Detail varchar
+  ImportBatchId int [ref: > ImportBatches.Id, note: 'written by an import; logs with null here mean someone worked on the course']
+}
+
+Table ImportBatches {
+  Id int [pk, increment]
+  FileName varchar [not null]
+  Kind varchar [not null, note: 'New / Existing']
+  CourseCount int [not null]
+  ImportedById int [not null, ref: > Users.Id]
+  ImportedAt datetime [not null]
+  UndoneById int [ref: > Users.Id]
+  UndoneAt datetime [note: 'null = still in place']
 }

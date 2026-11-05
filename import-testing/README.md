@@ -17,8 +17,8 @@
 | `07-existing-same-issue-twice.csv` | Existing | 可以导入 1 门，只开 1 张 ticket，有警告 | 通过 |
 | `08-wrong-template.csv` | New | 不接受，提示改用 Import existing courses | 通过 |
 | `09-old-master-layout.csv` | Existing | 不接受，提示缺少栏位 | 通过 |
-| `10-date-formats.csv` | Existing | **应该挡下日/月格式；现在 3 行都能导入** | **问题 1** |
-| `11-hidden-character-code.csv` | New | **应该挡下重复 Code；现在 4 行都能导入** | **问题 2** |
+| `10-date-formats.csv` | Existing | 挡下，2 个问题（文字日期只接受 `YYYY-MM-DD`） | 通过 |
+| `11-hidden-character-code.csv` | New | 挡下，2 个问题（隐藏字符和多余空格不能绕过重复检查） | 通过 |
 | `12-audit-owner-names.csv` | Existing | **应该检查名字；现在 3 行都能导入** | **问题 3** |
 | `13-price-currency-audience.csv` | Existing | **应该挡下；现在 3 行都能导入** | **问题 5** |
 | `14-new-large-1000.csv` | New | 可以导入 1,000 门 | 通过 |
@@ -42,10 +42,10 @@
 
 | # | 严重度 | 问题 | 例子 | 建议 |
 |---|---|---|---|---|
-| 1 | 高 | 文字日期被当成月/日，日/月的日期会默默变成错误日期 | `03/10/2026`（3 Oct）存成 3 月 10 日。旧 Excel 的文字里两种写法都有 | 文字日期只接受 `YYYY-MM-DD`；Excel 日期格式照常 |
-| 2 | 高 | 隐藏字符和多余空格可以绕过 Course Code 重复检查 | `DT-H1` 和后面带零宽字符的 `DT-H1` 算两门；`DT H1` 和 `DT  H1` 也算两门 | 比较前删除隐藏字符、合并空格 |
+| 1 | 已修好 | 文字日期被当成月/日，日/月的日期会默默变成错误日期 | `03/10/2026`（3 Oct）存成 3 月 10 日。旧 Excel 的文字里两种写法都有 | 文字日期只接受 `YYYY-MM-DD`；Excel 日期格式照常 |
+| 2 | 已修好 | 隐藏字符和多余空格可以绕过 Course Code 重复检查 | `DT-H1` 和后面带零宽字符的 `DT-H1` 算两门；`DT H1` 和 `DT  H1` 也算两门 | 比较前删除隐藏字符、合并空格 |
 | 3 | 中 | Audit Owner 不检查 | `Zed`、`rick`、SELM 的 `Gary` 都能导入。Team 页不算这些 audit，`rick` 的不算进 Rick | 待决定，见问题 B |
-| 4 | 高 | 导入后没有撤销 | Existing 导入的课程没有 Delete，要清掉只能 Clear all data（全部资料） | 整批撤销，或导入前先确认 |
+| 4 | 已修好 | 导入后没有撤销 | Existing 导入的课程没有 Delete，要清掉只能 Clear all data（全部资料） | 已加整批撤销：Courses 页的 Undo import 和 Import history |
 | 5 | 中 | 没有上限和合理性检查 | 价格 `999999999999` 超过数据库 `decimal(10,2)`；币种 `ZZZ`；`Partner, partner` 存成两个；日期 `1900-01-01` 也接受 | 加上限、币种清单，Audience 去重 |
 | 6 | 中 | Code 和 Name 没有长度限制 | 300 字的 Code、3,000 字的 Name 都能导入，可能撑破版面 | 和数据库长度一致 |
 | 7 | 低 | 只读第一张 sheet，提示没有说明 | 第一张是 Summary 时，只提示缺少栏位 | 提示里写明读的是哪张 sheet |
@@ -59,7 +59,7 @@
 
 | # | 问题 | 为什么要决定 |
 |---|---|---|
-| A | 导入错了要怎么还原？可以整批撤销吗？ | 现在只能 Clear all data |
+| A | 整批撤销的规则可以吗？ | 现在只有 Auditor 或导入的人能撤销；只要其中一门课被动过，整批都不能撤销 |
 | B | Audit Owner 不在系统里（已离职或还没开账号）时怎么办？ | 旧资料有 8 位 Audit Owner 不在 demo 的用户里，他们的 audit 不会出现在 Team 页 |
 | C | 导入的 audit 要算进 Team 的成绩和 Status report 吗？ | 现在会算，某段时间的数字可能突然变高 |
 | D | 谁可以导入 Existing？只要 Auditor 就够吗？还是要 Admin？ | 这个操作可以改很多资料，也会写入别人的 audit 结果 |
