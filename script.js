@@ -38,7 +38,7 @@ const ticket=id=>S.tickets.find(t=>t.id===id);
 const ticketsOf=cid=>S.tickets.filter(t=>t.courseId===cid);
 const openOf=cid=>ticketsOf(cid).filter(t=>t.status!==CLOSED);
 // two 7-day clocks: raised -> escalated, then escalated -> fix date set
-const slaFrom=t=>t.status==='New'?t.createdAt:t.status==='Escalated'&&!t.fixDate?t.escalatedAt:null;
+const slaFrom=t=>t.status==='New'?t.createdAt:(t.status==='Escalated'||t.status==='Retest Failed')&&!t.fixDate?t.escalatedAt:null;
 const isOverdue=t=>{const s=slaFrom(t);return !!s&&Date.now()-s>7*DAY};
 // a course waiting for audit also has 7 days, counted from when it was added, restored or queued for re-audit
 const pendingSince=c=>Math.max(c.createdAt||0,...S.logs.filter(l=>l.courseId===c.id&&['Course registered','Course restored','Re-audit queued'].includes(l.action)).map(l=>l.ts));
@@ -131,7 +131,13 @@ function closeFocus(){
   if(slot&&card){slot.style.minHeight='';slot.appendChild(card)}
   host.innerHTML='';
 }
+let draftStart='', leaveNext=null;
+function leaveGuard(next,sameCourse){if(!draft||sameCourse||JSON.stringify(draft)===draftStart)return false;leaveNext=next;
+  openModal(`<div class="ov-h"><h3>Leave this audit?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+    <div class="ov-b"><p style="margin:0">What you entered in this audit hasn't been submitted and will be lost.</p></div>
+    <div class="ov-f"><button class="btn" data-a="close">Keep auditing</button><button class="btn danger" data-a="leaveAudit">Leave audit</button></div>`);return true}
 function go(name,id){
+  if(leaveGuard(()=>go(name,id),name==='course'&&id===draft?.courseId))return;
   // leaving the page abandons an unfinished audit: the course goes back to how it was and the next audit starts fresh
   if(draft&&!(name==='course'&&id===draft.courseId)){const c=course(draft.courseId);if(c){c.lockedBy=null;c.lockedAt=null;if(!draft.re)c.auditorStatus='Pending'}draft=null;save()}
   closeFocus();view={name,id};editingT=null;enterAnim=true;rowAnim=true;render();window.scrollTo(0,0)}
@@ -359,14 +365,17 @@ const selmAct=t=>`<div class="tk-btns tk-act"><button class="btn updb sm" data-a
 // the first escalation's date is kept, so escalating again can't restart the 7-day clock
 const canUndoEsc=t=>t.status==='Escalated'&&!t.fixDate&&mine(t);
 // checks the fix date and note typed in the form; shows the problem on the form and returns false
-function fixFormOk(t){const id=t.id,fix=fromInput($(`#fix-${id}`).value),note=$(`#note-${id}`).value.trim();
+function fixFormOk(t,resolving){const id=t.id,fix=fromInput($(`#fix-${id}`).value),note=$(`#note-${id}`).value.trim();
   const stop=(msg,el)=>{$(`#fixErr-${id}`).textContent=msg;$(`#${el}-${id}`).focus();return false};
   const moved=t.fixDate&&(fix?toInput(fix):'')!==toInput(t.fixDate);
   if(moved&&!fix)return stop("A fix date can't be removed. Pick a new date.",'fix');
+  // 4. a new date can't be in the past; a past date already saved can stay while a note is added
+  if(fix&&fix<dayStart(Date.now())&&(!t.fixDate||moved))return stop('Pick today or a later date.','fix');
+  if(resolving&&!fix)return stop('Set a tentative fix date before resolving.','fix');
   if(moved&&!note)return stop('Add a note with the reason for changing the fix date.','note');
   $(`#fixErr-${id}`).textContent='';return true}
 const selmForm=t=>`<div class="tk-form">
-      <label class="field"><span>Tentative fix date</span><input type="date" id="fix-${t.id}" value="${t.fixDate?toInput(t.fixDate):''}"></label>
+      <label class="field"><span>Tentative fix date</span><input type="date" id="fix-${t.id}" min="${toInput(Date.now())}" value="${t.fixDate?toInput(t.fixDate):''}"></label>
       <label class="field grow"><span>Note</span><input type="text" id="note-${t.id}" placeholder="Progress, owner, or reason to cancel"></label>
       <span class="err" id="fixErr-${t.id}"></span>
       <div class="tk-btns"><button class="btn sm" data-a="saveT" data-id="${t.id}">Save</button><button class="btn okb sm" data-a="resolveT" data-id="${t.id}">Resolved</button><button class="btn danger sm" data-a="discT" data-id="${t.id}">Cancel</button>${canUndoEsc(t)?`<button type="button" class="btn sm" data-a="undoEsc" data-id="${t.id}" title="Put it back to New for any SELM"><span aria-hidden="true">↶</span> Undo escalate</button>`:''}<button type="button" class="btn sm tk-back" data-a="cancelT" aria-label="Back without saving" title="Back without saving (Esc)"><span aria-hidden="true">←</span> Back</button></div></div>`;
@@ -558,7 +567,7 @@ function vDash(){
     <label class="field"><span>To</span><input type="date" id="rTo" value="${toInput(to)}"></label>
     <button class="btn sm" data-a="rToday">Today</button><button class="btn sm" data-a="rWeek">7 days</button></div></div>
     <div class="kv"><div><b>${cnt('Audit passed')+cnt('Re-verification approved')}</b><span>Audits passed</span></div><div><b>${cnt('Audit failed')}</b><span>Audits failed</span></div>
-    <div><b>${inR.reduce((n,l)=>n+(l.ticketIds?.length||0),0)}</b><span>Tickets opened</span></div><div><b>${cnt('Escalated')}</b><span>Escalated</span></div>
+    <div><b>${inR.reduce((n,l)=>n+(l.ticketIds?.length||0),0)+cnt('Added after audit')}</b><span>Tickets opened</span></div><div><b>${cnt('Escalated')}</b><span>Escalated</span></div>
     <div><b>${cnt('Ticket closed')}</b><span>Tickets closed</span></div><div><b>${cnt('Retest failed')+cnt('Cancellation rejected')+cnt('Discontinuation rejected')}</b><span>Sent back</span></div></div></div>`;
 }
 
@@ -683,7 +692,8 @@ const A={
   openAuditor(id){go('auditor',id)},
   teamP(id){teamP=id;render()},
   filter(id){filter=id;refreshRows()},
-  goFilter(id){filter=id;go('courses')},
+  leaveAudit(){const next=leaveNext;leaveNext=null;closeOv();draftStart=JSON.stringify(draft);next?.()},
+  goFilter(id){if(leaveGuard(()=>A.goFilter(id)))return;filter=id;go('courses')},
   addCourse(){openModal(`<form id="addForm" novalidate style="display:contents"><div class="ov-h"><h3>Add a course</h3><button type="button" class="x" data-a="close" aria-label="Close">×</button></div>
     <div class="ov-b"><label class="field"><span class="req">Course code</span><input type="text" id="nCode" placeholder="e.g. ESSTGD04406"></label>
     <label class="field"><span class="req">Course name</span><input type="text" id="nName"></label>
@@ -749,7 +759,7 @@ const A={
     box.classList.toggle('open',open);box.querySelector('[data-a=toggleEdits]').textContent=open?'Hide changes':'Show changes'},
   toggleHist(id){const h=$('#hist-'+id),b=document.querySelector(`[data-a=toggleHist][data-id="${id}"]`),open=!openHist.has(id),n=+b.dataset.n;
     open?openHist.add(id):openHist.delete(id);h.classList.add('reveal');h.classList.toggle('open',open);b.textContent=open?'Show less':`Show ${n} earlier audit${n>1?'s':''}`},
-  dashGo(id){const [kind,k]=[id.slice(0,1),id.slice(2)];search='';catFilter='';auditedF='';myF=false;page=1;
+  dashGo(id){if(leaveGuard(()=>A.dashGo(id)))return;const [kind,k]=[id.slice(0,1),id.slice(2)];search='';catFilter='';auditedF='';myF=false;page=1;
     filter=kind==='c'?k:'all';tkF=kind==='t'?k:'';go('courses')},
   tkHl(id){tkF=tkF===id?'':id;refreshRows()},
   clearF(){search='';catFilter='';tkF='';auditedF='';filter='all';myF=false;
@@ -763,7 +773,7 @@ const A={
   startAudit(id,re){const c=course(id);c.lockedBy=user.name;c.lockedAt=Date.now();if(!re)c.auditorStatus='In Progress';
     const last=re?S.audits.filter(a=>a.courseId===id&&a.checklist?.length===8).sort((a,b)=>b.date-a.date)[0]?.checklist:null;
     const base=last?last.map(v=>v==='N/A'?'N/A':'Yes'):null;
-    draft={courseId:id,crit:base?[...base]:Array(8).fill(null),base,price:c.price??'',aud:audList(c.audience),issues:[],re:!!re};save();
+    draft={courseId:id,crit:base?[...base]:Array(8).fill(null),base,price:c.price??'',aud:audList(c.audience),issues:[],re:!!re};draftStart=JSON.stringify(draft);save();
     // open the form in place instead of re-rendering the page
     refreshInfo(c);
     const b=document.querySelector('[data-a=startAudit],[data-a=reaudit]'),p=b?.closest('.panel');if(!p){render();return}
@@ -782,10 +792,11 @@ const A={
   addIssue(){draft.issues.push({desc:'',cat:''});renderIssues();$(`#iDesc${draft.issues.length-1}`)?.focus()},
   rmIssue(i){draft.issues.splice(+i,1);renderIssues()},
   // a discontinued course no longer exists: it leaves the active queues and its open tickets are cancelled
-  discCourse(id){const c=course(id);openModal(`<div class="ov-h"><h3>Discontinue ${esc(c.code)}?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+  discCourse(id){const c=course(id),auditing=c.lockedBy;openModal(`<div class="ov-h"><h3>Discontinue ${esc(c.code)}?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
     <div class="ov-b"><p style="margin:0">The course is marked as no longer available. It leaves the active queues${openOf(id).length?` and its ${openOf(id).length} open ticket${openOf(id).length>1?'s are':' is'} cancelled`:''}.</p>
+      ${auditing?`<p class="warn-line" style="margin:0">${auditing===user.name?'You are':`${esc(auditing)} is`} auditing this course right now. Discontinuing ends that audit and its answers are lost.</p>`:''}
       <label class="field"><span class="req">Reason</span><input type="text" id="discWhy" placeholder="Reason the course is being retired"></label><span class="err" id="discErr"></span></div>
-    <div class="ov-f"><button class="btn" data-a="close">Keep course</button><button class="btn danger" data-a="doDiscCourse" data-id="${id}">Discontinue course</button></div>`);$('#discWhy')?.focus()},
+    <div class="ov-f"><button class="btn" data-a="close">Keep course</button><button class="btn danger" data-a="doDiscCourse" data-id="${id}">${auditing?'Discontinue anyway':'Discontinue course'}</button></div>`);$('#discWhy')?.focus()},
   doDiscCourse(id){const why=$('#discWhy').value.trim();if(!why){$('#discErr').textContent='Add a reason.';return $('#discWhy').focus()}
     const c=course(id),now=Date.now();
     openOf(id).forEach(t=>{t.status=CLOSED;t.closedAs='Cancelled';t.closedAt=now;tlog(t,'Ticket closed','Course discontinued')});
@@ -853,7 +864,7 @@ const A={
     const was=shortStatus(t.status);t.status=t.fixDate?'In Progress':'Escalated';t.justification=null;tlog(t,'Taken back',`${was} withdrawn by SELM`);
     editingT=id;flashId=id;save();flipRender();$(`#note-${id}`)?.focus();toast(`${id} taken back · edit and send again`)},
   // Resolved asks once more, since it hands the ticket to the auditor; the form stays open behind the dialog
-  resolveT(id){const t=ticket(id);if(!mine(t))return toast(`Only ${t.escalatedBy} can update ${id}`);if(!fixFormOk(t))return;
+  resolveT(id){const t=ticket(id);if(!mine(t))return toast(`Only ${t.escalatedBy} can update ${id}`);if(!fixFormOk(t,true))return;
     openModal(`<div class="ov-h"><h3>Mark ${id} as resolved?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
     <div class="ov-b"><p style="margin:0">${esc(t.category)} · ${esc(t.detail)}</p><p class="muted small" style="margin:0">It goes to the auditor to verify the fix. You can take it back until they check it.</p></div>
     <div class="ov-f"><button class="btn" data-a="close">Back</button><button class="btn okb" data-a="doResolveT" data-id="${id}">Yes, resolved</button></div>`)},
@@ -868,7 +879,11 @@ const A={
     rejecting=id;if(!el)return render();el.outerHTML=rejectBox(ticket(id));relayout();$('#rej-'+id)?.focus()},
   cancelReject(){const id=rejecting,el=$('#rej-'+id)?.closest('.tk-form');rejecting=null;
     if(!el)return render();el.outerHTML=approveBox(ticket(id));relayout()},
-  approve(id){const b=document.querySelector(`.approve-big[data-id="${id}"]`);
+  approve(id){const t=ticket(id),last=openOf(t.courseId).length===1;
+    openModal(`<div class="ov-h"><h3>${t.status===PV_DIS?`Approve cancelling ${id}?`:`Approve ${id}?`}</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+    <div class="ov-b"><p style="margin:0">${esc(t.category)} · ${esc(t.detail)}</p><p class="muted small" style="margin:0">The ticket closes and can't be reopened.${last?' It is the last open ticket, so the course becomes Healthy.':''}</p></div>
+    <div class="ov-f"><button class="btn" data-a="close">Back</button><button class="btn okb" data-a="confirmApprove" data-id="${id}">Yes, approve</button></div>`)},
+  confirmApprove(id){closeOv();const b=document.querySelector(`.approve-big[data-id="${id}"]`);
     if(!b||matchMedia('(prefers-reduced-motion: reduce)').matches)return A.doApprove(id);
     if(b.classList.contains('filling'))return;
     b.classList.add('filling');b.disabled=true;
@@ -952,7 +967,7 @@ document.addEventListener('change',e=>{
 document.addEventListener('input',e=>{
   const t=e.target;
   // pricing boxes are plain text boxes that keep only digits and one decimal point (2 places)
-  if(t.id==='fPrice'||t.id==='priceIn'){const v=t.value.replace(/[^\d.]/g,'').replace(/(\..*)\./g,'$1').replace(/(\.\d{2})\d+/,'$1');if(v!==t.value)t.value=v}
+  if(t.id==='fPrice'||t.id==='priceIn'){const v=t.value.replace(/[^\d.-]|(?!^)-/g,'').replace(/(\..*)\./g,'$1').replace(/(\.\d{2})\d+/,'$1');if(v!==t.value)t.value=v}
   if(t.id?.startsWith('iDesc'))draft.issues[+t.dataset.i].desc=t.value;
   else if(t.id==='fPrice'){draft.price=t.value;$('#formErr').textContent=''}
   // only refresh the table body so the search box keeps focus, scroll and IME composition
