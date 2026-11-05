@@ -88,9 +88,6 @@ erDiagram
     datetime EscalatedAt
     datetime FixDate
     datetime FirstFixDate
-    datetime RequestedFixDate
-    int FixRequestedById FK
-    datetime FixRequestedAt
     string Justification
     string Rejection
     datetime ClosedAt
@@ -217,8 +214,8 @@ erDiagram
 |---|---|
 | 课程 | `Course registered`、`Course discontinued`、`Course restored`、`Re-audit queued`、`Pricing updated`、`Audience updated`、`Course info updated` |
 | Audit | `Audit passed`、`Audit failed`、`Criteria updated`、`Re-verification approved` |
-| Ticket（Auditor） | `Ticket created`、`Added after audit`、`Edited by auditor`、`Ticket removed`、`Ticket closed`、`Retest failed`、`Cancellation rejected`、`Fix date changed`（批准改期）、`Fix date move rejected` |
-| Ticket（SELM） | `Escalated`、`Escalation undone`、`Fix date set`、`Fix date changed`、`Fix date move requested`、`Status → In Progress`、`Note added`、`Marked resolved`、`Proposed cancellation`、`Taken back`、`Taken over` |
+| Ticket（Auditor） | `Ticket created`、`Added after audit`、`Edited by auditor`、`Ticket removed`、`Ticket closed`、`Retest failed`、`Cancellation rejected` |
+| Ticket（SELM） | `Escalated`、`Escalation undone`、`Fix date set`、`Fix date changed`、`Status → In Progress`、`Note added`、`Marked resolved`、`Proposed cancellation`、`Taken back`、`Taken over` |
 
 ## 规则（服务器端要检查）
 
@@ -242,8 +239,8 @@ erDiagram
 - Ticket 填了 `FixDate` 就从 `Escalated` 变成 `In Progress`。
 - 第一次填 `FixDate` 不用写 note，同时存进 `FirstFixDate`（之后不再改）。填了之后不能清空，只能改成新日期。
 - 改 `FixDate` 一定要写 note，原因存进 `TICKET_NOTES`，`ACTIVITY_LOGS` 记 `Fix date changed`；改了几次就数这个 Action 的行数。
-- SELM 自己最多改 2 次。第 3 次起是申请：新日期存进 `RequestedFixDate`（加 `FixRequestedById`、`FixRequestedAt`），`FixDate` 不变，`ACTIVITY_LOGS` 记 `Fix date move requested`。Auditor 批准后 `FixDate` 换成新日期、记 `Fix date changed`；拒绝要写原因、记 `Fix date move rejected`，日期不变。两种结果都把这三个字段清空，ticket 送出 Resolved 或 Cancel、课程下架时也清空。申请等待中不能再改日期。
-- Dashboard 有 Fix date changes 表：列出还没关、改过 `FixDate` 的 ticket，显示次数、`FirstFixDate`、现在的 `FixDate`、等待批准的 `RequestedFixDate` 和最近一次的原因（最近一次 `Fix date changed` 或被批准的 `Fix date move requested` 之后的那笔 `Note added`）。都用查询算，不用新字段。
+- 改 `FixDate` 不限次数，也不用批准；次数和原因都显示出来，让大家知道。
+- Dashboard 有 Fix date changes 表：列出还没关、改过 `FixDate` 的 ticket，显示次数、`FirstFixDate`、现在的 `FixDate` 和最近一次的原因（最近一次 `Fix date changed` 之后的那笔 `Note added`）。都用查询算，不用新字段。
 - ETA missed：`Status` 是 `In Progress` 或 `Retest Failed`，而且今天已经过了 `FixDate`。不用存，查询时算，Dashboard 和 ticket 上都要显示。
 - Cancel ticket 一定要写原因（存在 `Justification`），Auditor 确认后 `ClosedAs = Cancelled`，课程不会下架。
 - 改课程的 `Code`、`Name`、`Type`：只有 Course Owner，课程不能是 `Discontinued`；`Code` 还是不能重复（包括已下架的课程）。`ACTIVITY_LOGS` 记 `Course info updated`，`Detail` 写旧值和新值。
