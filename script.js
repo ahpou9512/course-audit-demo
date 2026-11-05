@@ -101,6 +101,7 @@ function fresh(){S={courses:[],audits:[],tickets:[],logs:[],seq:{t:1001,a:1,c:1,
 let openHist=new Set(), openEdits=new Set(); // courses whose older audits are unfolded; audits whose criteria edits are listed
 let animTree=false, animatedFor=null, enterAnim=true, rowAnim=true, flashId=null, editingT=null; // editingT: ticket whose SELM form is open
 function render(){
+  if(editingT&&mine(ticket(editingT)))stashForm(editingT);
   if(view.name==='course'){animTree=animatedFor!==view.id;animatedFor=view.id}else{animTree=false;animatedFor=null}
   const cur=view.name==='course'?'courses':view.name==='auditor'?'team':view.name;
   $('#tabs').innerHTML=[['dashboard','Dashboard'],['courses','Courses'],['team','Team']] // History tab hidden for now; vHistory() is kept
@@ -140,6 +141,7 @@ function go(name,id){
   if(leaveGuard(()=>go(name,id),name==='course'&&id===draft?.courseId))return;
   // leaving the page abandons an unfinished audit: the course goes back to how it was and the next audit starts fresh
   if(draft&&!(name==='course'&&id===draft.courseId)){const c=course(draft.courseId);if(c){c.lockedBy=null;c.lockedAt=null;if(!draft.re)c.auditorStatus='Pending'}draft=null;save()}
+  if(editingT)stashForm(editingT);
   closeFocus();view={name,id};editingT=null;enterAnim=true;rowAnim=true;render();window.scrollTo(0,0)}
 
 /* ---------- courses list ---------- */
@@ -348,6 +350,7 @@ function swapCard(id,flash){
 }
 // opening or closing the SELM form only swaps the bottom of the card, so the records above never redraw
 function swapSelm(id,open){
+  if(!open)stashForm(id);
   const card=document.querySelector(`.tk[data-tid="${id}"]`),part=card?.querySelector('.tk-act,.tk-form');if(!part)return swapCard(id);
   const h0=card.offsetHeight;part.outerHTML=open?selmForm(ticket(id)):selmAct(ticket(id));card.querySelector('.tk-act,.tk-form').classList.add('enter');glide(card,h0);return card;
 }
@@ -360,7 +363,13 @@ const audEdit=t=>`<div class="tk-form tk-aud"><label class="field"><span>Categor
 // swap the auditor's part at the bottom of a ticket card, letting the card glide to its new height
 function swapAud(id,html){const card=document.querySelector(`.tk[data-tid="${id}"]`),part=card?.querySelector('.tk-aud');if(!part)return swapCard(id);
   const h0=card.offsetHeight;part.outerHTML=html;card.querySelector('.tk-aud').classList.add('enter');glide(card,h0);return card}
-const selmAct=t=>`<div class="tk-btns tk-act"><button class="btn updb sm" data-a="openT" data-id="${t.id}">Update <span class="arr" aria-hidden="true">→</span></button></div>`;
+// a double click on Save must not land on the Edit or Update button that takes its place
+const justSaved={};
+const formDrafts={}, draftKey=id=>`${user.name}:${id}`;
+function stashForm(id){const f=$(`#fix-${id}`),n=$(`#note-${id}`),t=ticket(id);if(!f||!n||!t)return;
+  const changed=f.value!==(t.fixDate?toInput(t.fixDate):'');
+  if(n.value.trim()||changed)formDrafts[draftKey(id)]={fix:f.value,note:n.value};else delete formDrafts[draftKey(id)]}
+const selmAct=t=>`<div class="tk-btns tk-act"><button class="btn updb sm" data-a="openT" data-id="${t.id}">Update <span class="arr" aria-hidden="true">→</span></button>${formDrafts[draftKey(t.id)]?'<span class="tk-unsaved">Unsaved changes</span>':''}</div>`;
 // an escalation can be undone by the same SELM until a fix date is set;
 // the first escalation's date is kept, so escalating again can't restart the 7-day clock
 const canUndoEsc=t=>t.status==='Escalated'&&!t.fixDate&&mine(t);
@@ -375,8 +384,8 @@ function fixFormOk(t,resolving){const id=t.id,fix=fromInput($(`#fix-${id}`).valu
   if(moved&&!note)return stop('Add a note with the reason for changing the fix date.','note');
   $(`#fixErr-${id}`).textContent='';return true}
 const selmForm=t=>`<div class="tk-form">
-      <label class="field"><span>Tentative fix date</span><input type="date" id="fix-${t.id}" min="${toInput(Date.now())}" value="${t.fixDate?toInput(t.fixDate):''}"></label>
-      <label class="field grow"><span>Note</span><input type="text" id="note-${t.id}" placeholder="Progress, owner, or reason to cancel"></label>
+      <label class="field"><span>Tentative fix date</span><input type="date" id="fix-${t.id}" min="${toInput(Date.now())}" value="${formDrafts[draftKey(t.id)]?.fix??(t.fixDate?toInput(t.fixDate):'')}"></label>
+      <label class="field grow"><span>Note</span><input type="text" id="note-${t.id}" placeholder="Progress, owner, or reason to cancel" value="${esc(formDrafts[draftKey(t.id)]?.note||'')}"></label>
       <span class="err" id="fixErr-${t.id}"></span>
       <div class="tk-btns"><button class="btn sm" data-a="saveT" data-id="${t.id}">Save</button><button class="btn okb sm" data-a="resolveT" data-id="${t.id}">Resolved</button><button class="btn danger sm" data-a="discT" data-id="${t.id}">Cancel</button>${canUndoEsc(t)?`<button type="button" class="btn sm" data-a="undoEsc" data-id="${t.id}" title="Put it back to New for any SELM"><span aria-hidden="true">↶</span> Undo escalate</button>`:''}<button type="button" class="btn sm tk-back" data-a="cancelT" aria-label="Back without saving" title="Back without saving (Esc)"><span aria-hidden="true">←</span> Back</button></div></div>`;
 // shown only in the focus view: the facts that matter
@@ -472,8 +481,7 @@ function submitAudit(){
   // a re-audit is saved when it finds a No or changes an answer (e.g. Yes → N/A); otherwise Cancel audit keeps it as it was
   if(draft.re&&!draft.crit.includes('No')&&draft.base&&draft.crit.join()===draft.base.join())
     return err('Nothing changed. Mark a criterion No or N/A, or use Cancel audit to keep it Healthy.');
-  c.price=price;c.audience=draft.aud.join(', ');
-  const info={price:c.price,audience:c.audience}, ts=Date.now();
+  const audience=draft.aud.join(', '), info={price,audience}, ts=Date.now();
   const started=c.lockedAt?` · started ${fmtDT(c.lockedAt)}`:'';
   if(draft.crit.includes('No')){
     const bad=draft.issues.findIndex(x=>!x.desc.trim()||!x.cat);
@@ -482,6 +490,7 @@ function submitAudit(){
       return openModal(`<div class="ov-h"><h3>Mark ${esc(c.code)} Unhealthy?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
         <div class="ov-b"><p style="margin:0">${n} criteri${n>1?'a':'on'} marked No. The course changes from Healthy to Unhealthy and ${k} ticket${k>1?'s are':' is'} created.</p></div>
         <div class="ov-f"><button class="btn" data-a="close">Back to form</button><button class="btn danger" data-a="confirmFail">Mark Unhealthy</button></div>`)}
+    c.price=price;c.audience=audience;
     const a=addAudit(c,'Failed',draft.crit.map(v=>v||'Yes'),info,draft.issues.map(x=>({...x})));
     const made=draft.issues.map(x=>{const t={id:'TKT-'+S.seq.t++,courseId:c.id,auditId:a.id,category:x.cat,detail:x.desc.trim(),status:'New',createdAt:ts,createdBy:user.name,
       escalatedAt:null,escalatedBy:null,fixDate:null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};S.tickets.push(t);return t});
@@ -489,6 +498,7 @@ function submitAudit(){
     log({courseId:c.id,ticketIds:made.map(t=>t.id),action:'Audit failed',detail:`${made.length} ticket(s) created: ${made.map(t=>`${t.id} ${t.category}`).join(', ')}${started}`});
     var msg=`Unhealthy · created ${made.map(t=>t.id).join(', ')}`, fill='--bad', label=`${made.length} ticket${made.length>1?'s':''} created`;
   }else{
+    c.price=price;c.audience=audience;
     addAudit(c,'Passed',[...draft.crit],info);
     c.health='Healthy';c.auditorStatus='Completed';c.auditCount++;c.lastAudited=ts;c.lastAuditor=user.name;
     log({courseId:c.id,action:'Audit passed',detail:`Iteration ${c.auditCount}${started}`});
@@ -580,7 +590,7 @@ const inPeriod=t=>{if(teamP==='all')return true;const n=new Date();return t>=new
 function auditorStats(name){
   const all=S.audits.filter(a=>a.auditor===name), runs=all.filter(a=>a.note!==REVERIFY&&inPeriod(a.date));
   return {audits:runs.length,courses:new Set(runs.map(a=>a.courseId)).size,issues:S.tickets.filter(t=>t.createdBy===name&&inPeriod(t.createdAt)).length,
-    verified:S.logs.filter(l=>l.actor===name&&l.action==='Ticket closed'&&inPeriod(l.ts)).length,last:all.length?Math.max(...all.map(a=>a.date)):null};
+    verified:S.logs.filter(l=>l.actor===name&&l.action==='Ticket closed'&&ticket(l.ticketId)?.closedAs==='Resolved'&&inPeriod(l.ts)).length,last:all.length?Math.max(...all.map(a=>a.date)):null};
 }
 const periodChips=()=>`<div class="chips-bar">${[['month','This month'],['all','All time']].map(([k,l])=>`<button class="fchip" data-a="teamP" data-id="${k}" aria-pressed="${teamP===k}">${l}</button>`).join('')}</div>`;
 const avatar=(u,cls)=>`<span class="avatar${cls?' '+cls:''}" aria-hidden="true">${esc(u.name[0])}</span>`;
@@ -725,14 +735,15 @@ const A={
     $('.fchip.mine')?.setAttribute('aria-pressed',myF);
     document.querySelectorAll('#tree .tree-kid').forEach(k=>k.classList.toggle('faded',myF&&ticket(k.dataset.slot)?.escalatedBy!==user.name))},
   pg(n){page=+n;refreshRows(true);$('.tbl-wrap')?.scrollIntoView({behavior:'smooth',block:'nearest'})},
-  editTk(id){swapAud(id,audEdit(ticket(id)));$('#ekDesc-'+id)?.focus()},
+  editTk(id){if(Date.now()-(justSaved[id]||0)<500)return;swapAud(id,audEdit(ticket(id)));$('#ekDesc-'+id)?.focus()},
   cancelTk(id){swapAud(id,audAct(ticket(id)))},
   saveTk(id){const t=ticket(id),cat=$('#ekCat-'+id).value,desc=$('#ekDesc-'+id).value.trim();
     if(!desc){$('#ekErr-'+id).textContent='Describe what is wrong.';return $('#ekDesc-'+id).focus()}
     const ch=[cat!==t.category?`Category: ${t.category} → ${cat}`:'',desc!==t.detail?'Description updated':''].filter(Boolean);
     if(!ch.length)return A.cancelTk(id);
     t.category=cat;t.detail=desc;tlog(t,'Edited by auditor',ch.join('; '));save();
-    const nu=swapCard(id,true);nu?.querySelector('.recs li')?.classList.add('new');toast(`${id} updated`)},
+    justSaved[id]=Date.now();const nu=swapCard(id,true);nu?.querySelector('.recs li')?.classList.add('new');
+    nu?.querySelector('.tk-btns')?.insertAdjacentHTML('beforeend','<span class="tk-saved ok">✓ Saved</span>');toast(`${id} updated`)},
   rmTk(id){const t=ticket(id);
     if(openOf(t.courseId).length<=1)return toast(`${id} is the only open ticket, so it can't be removed. Edit it instead, or let the SELM cancel it.`);
     openModal(`<div class="ov-h"><h3>Remove ${id}?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
@@ -832,6 +843,7 @@ const A={
     swapCard(id,true)?.querySelector('.tk-form')?.classList.add('enter');toast(isOverdue(t)?`${id} escalated · the fix date is overdue`:`${id} escalated · ${slaLeft(t)}`)},
   saveT(id,quiet){if(!mine(ticket(id)))return toast(`Only ${ticket(id).escalatedBy} can update ${id}`);const t=ticket(id),fix=fromInput($(`#fix-${id}`).value),note=$(`#note-${id}`).value.trim(),before=S.logs.length;
     if(!fixFormOk(t))return false;
+    delete formDrafts[draftKey(id)];
     const moved=t.fixDate&&(fix?toInput(fix):'')!==toInput(t.fixDate);
     if(moved||!t.fixDate&&fix){if(!t.fixDate)t.firstFix=fix;tlog(t,t.fixDate?'Fix date changed':'Fix date set',`${week(t.fixDate)} → ${week(fix)} (${fmtD(fix)})`);t.fixDate=fix}
     if(note){t.notes.push({ts:Date.now(),by:user.name,text:note});tlog(t,'Note added',note)}
@@ -841,11 +853,11 @@ const A={
     const say=(el,txt,cls)=>{el.querySelector('.tk-saved')?.remove();el.querySelector('.tk-btns')?.insertAdjacentHTML('beforeend',`<span class="tk-saved ${cls}">${txt}</span>`)};
     if(!added){if(card)say(card,'No changes to save','none');return}
     // close the form; the card comes back with its new record rows lit up and a saved note by Update
-    save();editingT=null;const nu=swapCard(id,true);if(!nu)return toast('Saved');
+    justSaved[id]=Date.now();save();editingT=null;const nu=swapCard(id,true);if(!nu)return toast('Saved');
     [...nu.querySelectorAll('.recs li')].slice(0,added).forEach(li=>li.classList.add('new'));say(nu,'✓ Saved','ok')},
-  openT(id){const prev=editingT;editingT=id;if(prev&&prev!==id)swapSelm(prev,false);
+  openT(id){if(Date.now()-(justSaved[id]||0)<500)return;const prev=editingT;editingT=id;if(prev&&prev!==id)swapSelm(prev,false);
     swapSelm(id,true)},
-  cancelT(){const id=editingT;editingT=null;if(id)swapSelm(id,false)},
+  cancelT(){const id=editingT;if(!id)return;$(`#note-${id}`)&&($(`#note-${id}`).value='');$(`#fix-${id}`)&&($(`#fix-${id}`).value=ticket(id).fixDate?toInput(ticket(id).fixDate):'');editingT=null;swapSelm(id,false)},
   undoEsc(id){const t=ticket(id);if(!canUndoEsc(t))return toast(`${id} can't be undone now`);
     t.status='New';t.escalatedBy=null;tlog(t,'Escalation undone','Back to New');editingT=null;save();
     swapCard(id,true);toast(`${id} is back to New`)},
@@ -873,7 +885,7 @@ const A={
     const t=ticket(id);openModal(`<div class="ov-h"><h3>Ask to cancel ${id}?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
     <div class="ov-b"><p style="margin:0">${esc(t.category)} · ${esc(t.detail)}</p><p style="margin:0"><b>Reason:</b> ${esc(note)}</p><p class="muted small" style="margin:0">It goes to the auditor, who decides whether to close it. You can take it back until they check it.</p></div>
     <div class="ov-f"><button class="btn" data-a="close">Back</button><button class="btn danger" data-a="doDiscT" data-id="${id}">Yes, cancel ticket</button></div>`)},
-  doDiscT(id){closeOv();const t=ticket(id),box=$(`#note-${id}`);if(!box||!mine(t))return toast(`${id} has changed; nothing was sent`);const note=box.value.trim();t.notes.push({ts:Date.now(),by:user.name,text:note});t.status=PV_DIS;t.justification=note;tlog(t,'Proposed cancellation',note);editingT=null;flashId=id;save();render();toast(`${id} sent for verification`)},
+  doDiscT(id){closeOv();const t=ticket(id),box=$(`#note-${id}`);if(!box||!mine(t))return toast(`${id} has changed; nothing was sent`);const note=box.value.trim();delete formDrafts[draftKey(id)];t.notes.push({ts:Date.now(),by:user.name,text:note});t.status=PV_DIS;t.justification=note;tlog(t,'Proposed cancellation',note);editingT=null;flashId=id;save();render();toast(`${id} sent for verification`)},
   startReject(id){if(rejecting)A.cancelReject();
     const el=document.querySelector(`[data-a=startReject][data-id="${id}"]`)?.closest('.tk-approve');
     rejecting=id;if(!el)return render();el.outerHTML=rejectBox(ticket(id));relayout();$('#rej-'+id)?.focus()},
@@ -955,7 +967,7 @@ document.addEventListener('change',e=>{
   if(t.name&&/^c\d$/.test(t.name)){draft.crit[+t.name.slice(1)]=t.value;$('#formErr').textContent='';renderIssues()}
   else if(t.name&&/^e\d$/.test(t.name))t.closest('.crit-row').classList.toggle('no',t.value==='No');
   else if(t.name==='fAud'){draft.aud=[...document.querySelectorAll('input[name=fAud]:checked')].map(x=>x.value);$('#formErr').textContent=''}
-  else if(t.id==='userSel'){user=USERS.find(u=>u.id===t.value);closeOv();render();toast(`Now ${user.name} (${user.role})`)}
+  else if(t.id==='userSel'){if(editingT)stashForm(editingT);user=USERS.find(u=>u.id===t.value);closeOv();render();toast(`Now ${user.name} (${user.role})`)}
   else if(t.id==='statusF'){filter=t.value||'all';refreshRows()}
   else if(['catFilter','auditedF'].includes(t.id)){
     ({catFilter:v=>catFilter=v,auditedF:v=>auditedF=v})[t.id](t.value);

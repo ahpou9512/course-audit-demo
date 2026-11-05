@@ -192,7 +192,7 @@ erDiagram
     | Audits | `AUDITS` 里 `AuditorId` 是他、`IsReverification = false` 的行数 |
     | Courses audited | 同上，`CourseId` 不重复的数量 |
     | Issues raised | `TICKETS` 里 `CreatedById` 是他的数量（包括之后补开的） |
-    | Fixes verified | `ACTIVITY_LOGS` 里 `ActorId` 是他、`Action = Ticket closed` 的行数 |
+    | Fixes verified | `TICKETS` 里 `ClosedById` 是他、`ClosedAs = Resolved` 的行数；批准 Cancel 和课程下架都不算；"This month" 用 `ClosedAt` 算 |
     | Audits per month | `AUDITS` 按 `AuditedAt` 的年月分组计数 |
 
     "This month" 只是多加一个条件：`AuditedAt >= 这个月 1 号`。EF Core 写起来大概是：
@@ -206,7 +206,7 @@ erDiagram
         .ToListAsync();
     ```
 
-    资料多了以后，在 `AUDITS (AuditorId, AuditedAt)` 和 `ACTIVITY_LOGS (ActorId, Action, CreatedAt)` 加 index，查询就会快。
+    资料多了以后，在 `AUDITS (AuditorId, AuditedAt)` 和 `TICKETS (ClosedById, ClosedAs, ClosedAt)` 加 index，查询就会快。
 
 ## ACTIVITY_LOGS.Action 的值
 
@@ -223,6 +223,7 @@ erDiagram
 - 有任何 `No` 就一定要开至少一张 ticket。
 - 有 `No` 时，Auditor 没选的 criteria 一律存成 `Yes`，所以每次 audit 在 `AUDIT_ANSWERS` 永远是完整的 8 行；一个 `No` 都没有（全部通过）时，8 条都要明确选过才能提交。
 - Catalog audience 是选填：audit 表单和课程页都可以一个都不选，`COURSE_AUDIENCES` 就没有这门课的行，`AudienceSnapshot` 是空的。
+- Audit 提交成功才写入课程的 `DoceboPrice` 和 `COURSE_AUDIENCES`；验证失败或取消都不改课程。
 - 还有 ticket 没关时，这次 audit 至少要留一个 `No`。
 - 全部 ticket 关闭后，自动建一次 re-verification audit（`IsReverification = true`），答案全部是 `Yes`，原本 `N/A` 的保持 `N/A`。
 - 课程等 audit 也是 7 天：停在 Pending audit 超过 7 天就算超时。从课程新增、restore 或排入 re-audit（`COURSES.CreatedAt` 或 `ACTIVITY_LOGS` 里最新的 `Course registered`、`Course restored`、`Re-audit queued`）开始算，不用新字段。

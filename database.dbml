@@ -132,6 +132,10 @@ Table Tickets {
   ClosedAt datetime
   ClosedById int [ref: > Users.Id, note: 'auditor who approved']
   ClosedAs ClosedAs
+
+  indexes {
+    (ClosedById, ClosedAs, ClosedAt) // Team page: fixes verified per auditor
+  }
 }
 
 Table TicketNotes {
@@ -151,8 +155,4 @@ Table ActivityLogs {
   AuditId int [ref: > Audits.Id, note: 'set for criteria edits']
   Action varchar [not null, note: 'see the Action list in database.md']
   Detail varchar
-
-  indexes {
-    (ActorId, Action, CreatedAt) // Team page: fixes verified per auditor
-  }
 }

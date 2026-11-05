@@ -259,6 +259,7 @@ html{overflow-y:scroll}
 td>.aud-sla{display:block;margin-top:4px}
 .aud-sla.late{color:var(--bad);font-weight:600}
 .warn-line{color:var(--bad);font-weight:600;font-size:13px}
+.tk-unsaved{font-size:12px;font-weight:600;color:var(--warn);align-self:center}
 .move-hi{color:var(--bad);font-weight:600}
 .info-log{display:flex;flex-direction:column;gap:6px;font-size:13px;overflow-wrap:anywhere}
 .move-why{min-width:180px;overflow-wrap:anywhere}
