@@ -724,7 +724,7 @@ const COURSE_TYPES=['Learning Plan','ILT','On-Demand'];
 const IMP_NEW=['Course Code','Course Name','Type'];
 const IMP_OLD=[...IMP_NEW,'Course Status','Docebo Price','Currency','Audience',...CRITERIA,'Audit Owner','Audit Date','Audit Note','Issue','Category'];
 const IMP_COLS={new:IMP_NEW,old:IMP_OLD};
-const IMP_SHOW=100;
+const IMP_SHOW=100, IMP_PROBLEMS=500;
 let imp=null, xlsxLoad=null, lastImp=null;
 const IMP_REPEAT=IMP_OLD.filter(h=>!['Course Code','Issue','Category'].includes(h));
 function impSame(h,v){
@@ -775,54 +775,57 @@ function checkImport(kind,rows){
   const groups=new Map(),order=[],ready=[],skipped=[],names=new Map();
   rows.slice(headAt+1).forEach((r,i)=>{if(!r.some(v=>impText(v)))return;
     const row=headAt+i+2,code=cleanCode(get(r,'Course Code'));
-    if(!code)return skipped.push({row,code:'—',why:'Course code is missing.'});
+    if(!code)return skipped.push({row,code:'',name:impText(get(r,'Course Name')),col:'Course Code',val:'',why:'Course code is missing.'});
     const k=code.toLowerCase();
     if(!groups.has(k)){groups.set(k,[]);order.push(k)}
     groups.get(k).push({row,r})});
-  for(const k of order){const g=groups.get(k),first=g[0].r,row=g[0].row,why=[];
+  for(const k of order){const g=groups.get(k),first=g[0].r,row=g[0].row;let failedCheck=false;
     const code=cleanCode(get(first,'Course Code')),name=impText(get(first,'Course Name')),type=impType(get(first,'Type'));
-    if(!name)why.push('Course name is missing.');
-    if(!type)why.push(`Type must be ${COURSE_TYPES.join(', ')}.`);
-    if(S.courses.some(c=>codeKey(c.code)===k))why.push('Already in the masterlist.');
+    // one entry per problem: where it is, what the file says there, and why that stops the import
+    const bad=(c,val,why,at=row)=>{failedCheck=true;skipped.push({row:at,code,name:impText(get(g.find(o=>o.row===at).r,'Course Name'))||name,col:c,val:impText(val),why})};
+    if(!name)bad('Course Name','','Course name is missing.');
+    if(!type)bad('Type',get(first,'Type'),`Type must be ${COURSE_TYPES.join(', ')}.`);
+    const taken=S.courses.find(c=>codeKey(c.code)===k);
+    if(taken)bad('Course Code',code,`This course code is already in the system${taken.health==='Discontinued'?' as a discontinued course':''}: ${taken.name}.`);
     const x={code,name,type,row,warn:S.courses.find(c=>normName(c.name)===normName(name))?.code||''};
-    if(kind==='new'){if(g.length>1)skipped.push(...g.slice(1).map(o=>({row:o.row,code,why:'Same course code appears earlier in this file.'})))}
+    if(kind==='new')g.slice(1).forEach(o=>bad('Course Code',code,`This course code is already used in row ${row}.`,o.row));
     else{
       const disc=impKey(get(first,'Course Status'));
-      if(disc!=='active'&&disc!=='discontinued')why.push('Course status must be Active or Discontinued.');
+      if(disc!=='active'&&disc!=='discontinued')bad('Course Status',get(first,'Course Status'),'Course status must be Active or Discontinued.');
       const isDisc=disc==='discontinued';
-      const price=toPrice(get(first,'Docebo Price'));if(Number.isNaN(price))why.push('Docebo price must be a number of 0 or more.');
+      const price=toPrice(get(first,'Docebo Price'));if(Number.isNaN(price))bad('Docebo Price',get(first,'Docebo Price'),'Docebo price must be a number of 0 or more, with no commas or symbols.');
       const currency=impText(get(first,'Currency')).toUpperCase();
-      if(currency&&!/^[A-Z]{3}$/.test(currency))why.push('Currency must be a 3-letter code, like USD or CNY.');
-      if(currency&&price==null)why.push('Currency needs a Docebo price.');
+      if(currency&&!/^[A-Z]{3}$/.test(currency))bad('Currency',get(first,'Currency'),'Currency must be a 3-letter code, like USD or CNY.');
+      if(currency&&price==null)bad('Docebo Price','','Currency is filled in, but Docebo price is blank.');
       const aud=audList(get(first,'Audience')).map(a=>({a,hit:AUDIENCES.find(o=>o.toLowerCase()===a.toLowerCase())}));
-      const badAud=aud.filter(a=>!a.hit).map(a=>a.a);if(badAud.length)why.push(`Unknown audience: ${badAud.join(', ')}.`);
+      aud.filter(a=>!a.hit).forEach(a=>bad('Audience',a.a,`Audience must be ${AUDIENCES.join(', ')}.`));
       const crit=CRITERIA.map((h,i)=>{const v=get(first,h);return impText(v)?impAnswer(v,i):''});
       // a discontinued course keeps what was recorded, and its answers no longer decide anything
-      if(!isDisc)crit.forEach((v,i)=>{if(v===null)why.push(`"${CRITERIA[i]}" must be ${answers(i).join(', ')}.`)});
+      if(!isDisc)crit.forEach((v,i)=>{if(v===null)bad(CRITERIA[i],get(first,CRITERIA[i]),`The answer must be ${answers(i).join(', ')}.`)});
       const anyNo=crit.includes('No');
-      if(!isDisc&&!anyNo&&crit.includes(''))why.push('Answer all 8 criteria, or mark the failed ones No.');
-      const auditor=impText(get(first,'Audit Owner'));if(!auditor)why.push('Audit owner is missing.');
+      if(!isDisc&&!anyNo)crit.forEach((v,i)=>{if(v==='')bad(CRITERIA[i],'','This criterion has no answer.')});
+      const auditor=impText(get(first,'Audit Owner'));if(!auditor)bad('Audit Owner','','Audit owner is missing.');
       const raw=get(first,'Audit Date'),date=impDate(raw);
-      if(!impText(raw))why.push('Audit date is missing.');
-      else if(Number.isNaN(date))why.push('Audit date must be written as YYYY-MM-DD, like 2026-10-28.');
-      else if(date>dayStart(Date.now()))why.push("Audit date can't be in the future.");
+      if(!impText(raw))bad('Audit Date','','Audit date is missing.');
+      else if(Number.isNaN(date))bad('Audit Date',raw,'Audit date is not in YYYY-MM-DD format.');
+      else if(date>dayStart(Date.now()))bad('Audit Date',typeof raw==='number'?toInput(date):raw,'Audit date is in the future.');
       const note=impText(get(first,'Audit Note'));
-      if(isDisc&&!note)why.push('A discontinued course needs its reason in Audit Note.');
+      if(isDisc&&!note)bad('Audit Note','','This course is Discontinued, but it has no reason.');
       const issues=[],seenIssues=new Set();let dupes=0;
       g.forEach((o,n)=>{const desc=impText(get(o.r,'Issue')),rawCat=impText(get(o.r,'Category')),cat=CATS.find(c=>c.toLowerCase()===rawCat.toLowerCase());
-        if(n){const diff=IMP_REPEAT.filter(h=>impText(get(o.r,h))&&impSame(h,get(o.r,h))!==impSame(h,get(first,h)));
-          if(diff.length)why.push(`Row ${o.row} uses the same course code as row ${row} but has a different ${diff.join(', ')}.`)}
-        if(!desc&&!rawCat){if(n)why.push(`Row ${o.row} repeats this course code with no issue.`);return}
-        if(isDisc)return why.push(`Row ${o.row}: a discontinued course opens no tickets. Move this to Audit Note.`);
-        if(!desc)why.push(`Row ${o.row}: issue description is missing.`);
-        if(!cat)why.push(`Row ${o.row}: category must be one of ${CATS.join(', ')}.`);
+        if(n)IMP_REPEAT.forEach(h=>{if(impText(get(o.r,h))&&impSame(h,get(o.r,h))!==impSame(h,get(first,h)))bad(h,get(o.r,h),`This is different from row ${row}, which has the same course code.`,o.row)});
+        if(!desc&&!rawCat){if(n)bad('Issue','',`This row repeats course code ${code}, but has no issue.`,o.row);return}
+        if(isDisc)return bad('Issue',desc||rawCat,'This course is Discontinued, but it has an issue.',o.row);
+        if(!desc)bad('Issue','','Category is filled in, but Issue is blank.',o.row);
+        else if(!rawCat)bad('Category','','Issue is filled in, but Category is blank.',o.row);
+        else if(!cat)bad('Category',rawCat,`Category must be only one of ${CATS.join(', ')}.`,o.row);
         const issueKey=`${impKey(rawCat)}|${normName(desc)}`;
         if(seenIssues.has(issueKey)){dupes++;return}
         seenIssues.add(issueKey);issues.push({cat:cat||rawCat,desc})});
-      if(!isDisc&&anyNo&&!issues.length)why.push('A No needs at least one issue.');
-      if(!isDisc&&!anyNo&&issues.length)why.push('It has an issue but no criterion is marked No.');
+      if(!isDisc&&anyNo&&!issues.length){const nos=CRITERIA.filter((_,i)=>crit[i]==='No');bad('Issue','',`${nos.join(', ')} ${nos.length>1?'are':'is'} No, but Issue is blank.`)}
+      if(!isDisc&&!anyNo&&issues.length)bad('Issue',issues[0].desc,'Issue is filled in, but no criterion is marked No.');
       Object.assign(x,{disc:isDisc,price:Number.isNaN(price)?null:price,currency,audience:aud.map(a=>a.hit).filter(Boolean).join(', '),crit:crit.map(v=>v||(isDisc?'N/A':'Yes')),auditor,date,note,issues,dupes,failed:anyNo&&!isDisc,anyNo})}
-    if(why.length){skipped.push({row,code,why:why.join(' ')});continue}
+    if(failedCheck)continue;
     const nameKey=normName(name);if(!x.warn)x.warn=names.get(nameKey)||'';if(!names.has(nameKey))names.set(nameKey,code);
     ready.push(x)}
   skipped.sort((a,b)=>a.row-b.row);
@@ -844,11 +847,16 @@ function impPreview(){const {kind,file,ready,skipped}=imp,n=ready.length,isNew=k
   const more=(len)=>len>IMP_SHOW?`<p class="muted small" style="margin:0">Showing the first ${IMP_SHOW} of ${len}.</p>`:'';
   // one wrong row stops the whole file, so nothing is half imported
   if(blocked){
+    const courses=new Set(skipped.map(s=>s.code||`row${s.row}`)).size,byCol=new Map();
+    skipped.forEach(s=>byCol.set(s.col,(byCol.get(s.col)||0)+1));
+    const cut=skipped.length>IMP_PROBLEMS;
     openModal(`<div class="ov-h"><h3>Can't import ${esc(file)}</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
-    <div class="ov-b"><p class="imp-stop">${skipped.length} problem${skipped.length>1?'s':''} found. Nothing was imported. Fix ${skipped.length>1?'them':'it'} in the file, then upload it again.</p>
-      <div class="imp-sec"><div class="tbl-wrap"><table class="imp-tbl"><thead><tr><th>Row</th><th>Course</th><th>Problem</th></tr></thead><tbody>${skipped.slice(0,IMP_SHOW).map(s=>`<tr><td>${s.row}</td><td>${esc(s.code)}</td><td>${esc(s.why)}</td></tr>`).join('')}</tbody></table></div>${more(skipped.length)}</div></div>
+    <div class="ov-b"><div class="imp-stop"><b>${skipped.length} problem${skipped.length>1?'s':''} in ${courses} course${courses>1?'s':''}.</b> Nothing was imported.</div>
+      ${byCol.size>1?`<div class="imp-cols"><span class="muted small">Columns with problems</span>${[...byCol].sort((a,b)=>b[1]-a[1]).map(([c,n])=>`<span class="imp-col">${esc(c)} <b>${n}</b></span>`).join('')}</div>`:''}
+      <div class="tbl-wrap imp-probs"><table class="imp-tbl"><thead><tr><th>Row</th><th>Course</th><th>Column</th><th>In the file</th><th>Problem</th></tr></thead><tbody>${skipped.slice(0,IMP_PROBLEMS).map(s=>`<tr><td class="imp-row">${s.row}</td><td>${s.code?`<span class="mono">${esc(s.code)}</span>`:'<span class="muted">No code</span>'}${s.name?`<div class="muted small">${esc(s.name)}</div>`:''}</td><td><b>${esc(s.col)}</b></td><td>${s.val?`<span class="imp-val">${esc(s.val.length>80?s.val.slice(0,80)+'…':s.val)}</span>`:'<span class="imp-val blank">Blank</span>'}</td><td>${esc(s.why)}</td></tr>`).join('')}</tbody></table></div>
+      ${cut?`<p class="muted small" style="margin:0">Showing the first ${IMP_PROBLEMS} of ${skipped.length}. </p>`:''}</div>
     <div class="ov-f"><button class="btn" data-a="close">Close</button><button class="btn primary" data-a="impAgain">Choose another file</button></div>`);
-    $('.modal').classList.add('imp-wide');return}
+    $('.modal').classList.add('imp-wide','imp-errors');return}
   const failed=ready.filter(x=>x.failed),gone=ready.filter(x=>x.disc).length,pass=n-failed.length-gone,tix=failed.reduce((s,x)=>s+x.issues.length,0);
   const facts=isNew?`<div class="imp-fact"><b>${n}</b><span>Pending audit</span></div>`
     :`<div class="imp-fact"><b>${pass}</b><span>Healthy</span></div><div class="imp-fact"><b>${failed.length}</b><span>Unhealthy</span></div>${gone?`<div class="imp-fact"><b>${gone}</b><span>Discontinued</span></div>`:''}<div class="imp-fact"><b>${tix}</b><span>Tickets to open</span></div>`;

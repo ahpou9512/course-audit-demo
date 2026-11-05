@@ -13,7 +13,7 @@
 | `03-new-same-name.csv` | New | 可以导入 2 门，1 个同名警告 | 通过 |
 | `04-existing-valid.xlsx` | Existing | 3 Healthy、2 Unhealthy、1 Discontinued、3 张 ticket | 通过 |
 | `05-existing-bad-data.csv` | Existing | 挡下，13 个问题 | 通过 |
-| `06-existing-same-code-different-data.csv` | Existing | 挡下，1 个问题 | 通过 |
+| `06-existing-same-code-different-data.csv` | Existing | 挡下，2 个问题（Course Name 和 Docebo Price 不同） | 通过 |
 | `07-existing-same-issue-twice.csv` | Existing | 可以导入 1 门，只开 1 张 ticket，有警告 | 通过 |
 | `08-wrong-template.csv` | New | 不接受，提示改用 Import existing courses | 通过 |
 | `09-old-master-layout.csv` | Existing | 不接受，提示缺少栏位 | 通过 |
@@ -31,7 +31,7 @@
 
 - 权限：Auditor 两种都能用，Course Owner 只能用 New，SELM 看不到 Import。
 - 文件：`.xlsx`、`.csv`、大写副档名、栏位顺序不同、多余栏位、空白行都正常；错误文件、坏文件、空文件都有清楚提示。行号正确。
-- 一行不对就整个文件不能导入，资料完全不变。
+- 一行不对就整个文件不能导入，资料完全不变。错误会逐项列出行号、课程、栏位、文件里的值和问题。
 - Discontinued 的 Course Code 不能再用，Add course 和 Import 都挡下。
 - 导入后的流程：Escalate、填 fix date、Resolved、Approve 变 Healthy；Start audit；Re-audit；Restore 都正常。
 - 文字和文件名里的 HTML 不会被执行。

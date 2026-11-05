@@ -235,7 +235,7 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 | 模板栏位 | Course Code、Course Name、Type | 前三栏，加 Course Status、Docebo Price、Currency、Audience、8 项 criteria、Audit Owner、Audit Date、Audit Note、Issue、Category，共 20 栏 |
 | 导入后 | `Pending Audit`，等 audit 的 7 天从导入时算 | `Course Status = Discontinued` 就下架；否则有 `No` 是 `Unhealthy` 并开 `New` ticket；都不是就 `Healthy`，`AuditCount = 1` |
 
-- 这些都算错误，会挡下整个文件，并列出行号和原因：系统里已有的 Course Code（包括 Discontinued）、文件里重复的 Course Code、资料不合规则的行。
+- 这些都算错误，会挡下整个文件，并逐项列出行号、课程、栏位、文件里的值和问题：系统里已有的 Course Code（包括 Discontinued）、文件里重复的 Course Code、资料不合规则的行。
 - Existing 文件里同一个 Course Code 的后续行只能加 issue：其他栏位可以留空或和第一行相同；填了不同的值，就算 Course Code 重复，整个文件不能导入。这是模板唯一允许重复 Course Code 的情况，因为一门课有多个 issue。
 - 同一门课里 Issue 和 Category 都相同的行只开一张 ticket，预览会提示。
 - 课程名称相同（和系统里的或文件里的）只警告，还是可以导入，因为不同 Course Code 可能真的同名。有警告的课程排在预览最前面。

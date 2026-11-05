@@ -296,7 +296,19 @@ td>.aud-sla{display:block;margin-top:4px}
 .imp-hist{align-self:flex-start}
 .imp-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px;border:1px solid var(--accent);border-radius:8px;background:var(--accent-soft);font-size:13.5px;overflow-wrap:anywhere}
 .imp-banner span{flex:1 1 200px;min-width:0}
-.imp-stop{margin:0;padding:10px 12px;border-radius:8px;background:var(--bad-bg);color:var(--bad);font-weight:600}
+.imp-stop{margin:0;padding:10px 12px;border-radius:8px;background:var(--bad-bg);color:var(--bad);font-weight:500}
+.imp-stop b{font-weight:700}
+.modal.imp-errors{width:min(1040px,100%)}
+.imp-cols{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.imp-col{font-size:12.5px;padding:2px 9px;border:1px solid var(--line);border-radius:999px}
+.imp-col b{color:var(--bad)}
+.imp-probs{overflow:auto;flex:0 1 auto}
+.imp-probs .imp-tbl{min-width:760px}
+.imp-probs th{position:sticky;top:0;z-index:1}
+.imp-probs th:first-child,.imp-probs .imp-row{width:48px}
+.imp-probs .imp-row{font-weight:700}
+.imp-val{display:inline-block;padding:1px 6px;border-radius:5px;background:var(--bad-bg);color:var(--bad);font-weight:600}
+.imp-val.blank{background:var(--surface-2);color:var(--muted);font-weight:500;font-style:italic}
 .imp-sec{display:flex;flex-direction:column;gap:6px}
 .imp-sec h4{margin:0;font-size:13px}
 .imp-tbl{width:100%;border-collapse:collapse;font-size:13px}
