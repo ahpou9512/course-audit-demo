@@ -126,6 +126,10 @@ Table Tickets {
   EscalatedById int [ref: > Users.Id, note: 'the SELM who owns the ticket']
   EscalatedAt datetime
   FixDate date
+  FirstFixDate date [note: 'the first date set, never changes; moves are counted from ActivityLogs']
+  RequestedFixDate date [note: 'a third move onward waits here for an auditor']
+  FixRequestedById int [ref: > Users.Id]
+  FixRequestedAt datetime
   Justification varchar [note: 'reason to cancel']
   Rejection varchar [note: 'why the auditor sent it back']
   ClosedAt datetime
