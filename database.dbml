@@ -59,6 +59,7 @@ Table Courses {
   Name varchar [not null]
   Type varchar [note: 'Learning Plan / ILT / On-Demand']
   DoceboPrice decimal(10,2) [note: 'null = not filled in yet']
+  Currency varchar(3) [note: 'USD, CNY...; null = not stated']
   Health CourseHealth [not null, default: 'Pending Audit']
   AuditStatus AuditStatus [not null, default: 'Pending']
   CurrentAuditId int [ref: > Audits.Id, note: 'the audit of the current round']
@@ -122,6 +123,7 @@ Table Tickets {
   Detail varchar [not null]
   Status TicketStatus [not null, default: 'New']
   CreatedAt datetime [not null]
+  SlaStartAt datetime [note: 'imported tickets: the import day; null = count from CreatedAt']
   CreatedById int [not null, ref: > Users.Id, note: 'auditor who opened it (at the audit or added later)']
   EscalatedById int [ref: > Users.Id, note: 'the SELM who owns the ticket']
   EscalatedAt datetime

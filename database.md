@@ -37,6 +37,7 @@ erDiagram
     string Name
     string Type
     decimal DoceboPrice
+    string Currency
     string Health
     string AuditStatus
     int CurrentAuditId FK
@@ -83,6 +84,7 @@ erDiagram
     string Detail
     string Status
     datetime CreatedAt
+    datetime SlaStartAt
     int CreatedById FK
     int EscalatedById FK
     datetime EscalatedAt
@@ -208,6 +210,26 @@ erDiagram
 
     资料多了以后，在 `AUDITS (AuditorId, AuditedAt)` 和 `TICKETS (ClosedById, ClosedAs, ClosedAt)` 加 index，查询就会快。
 
+## 导入课程
+
+Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），先预览，确认后才写入。不需要新表，Action 也沿用下面的值。
+
+| | New courses | Existing courses |
+|---|---|---|
+| 谁可以用 | Auditor、Course Owner | 只有 Auditor，因为会写入 audit 结果 |
+| 模板栏位 | Course Code、Course Name、Type | 前三栏，加 Course Status、Docebo Price、Currency、Audience、8 项 criteria、Audit Owner、Audit Date、Audit Note、Issue、Category，共 20 栏 |
+| 导入后 | `Pending Audit`，等 audit 的 7 天从导入时算 | `Course Status = Discontinued` 就下架；否则有 `No` 是 `Unhealthy` 并开 `New` ticket；都不是就 `Healthy`，`AuditCount = 1` |
+
+- 系统里已有的 Course Code（包括 Discontinued）、文件里重复的 code、资料不合规则的行都跳过，并在预览列出原因；其他行照样导入。
+- Existing 模板一门课一行；多个 issue 就多加一行，写同一个 Course Code，只要填 Issue 和 Category。每个 issue 只有一个 Category。
+- Existing 用的规则和 audit 表单一样：有 `No` 一定要有 issue，没有 `No` 就不能有 issue；没有 `No` 时 8 项都要答；`N/A` 只有前 3 项能用；有 `No` 时空白的存成 `Yes`。Audit Date 不能在未来。
+- 导入的 ticket：`CreatedAt` 是 Audit Date，`SlaStartAt` 是导入当天，escalate 的 7 天从 `SlaStartAt` 算。手动开的 ticket `SlaStartAt` 是空的，从 `CreatedAt` 算。
+- `Course Status = Discontinued`：不检查 criteria，空白的存成 `N/A`，也不能有 Issue（要写在 Audit Note）；原因必填，写在 Audit Note，存进 `DiscontinueReason`。Audit 记录照样保留，也可以 restore。
+- Audit Note 存在那次 audit 的备注里，不开 ticket。
+- `Currency` 选填，3 个英文字母；有 Currency 就一定要有 Docebo Price。空的表示资料没写币种。
+- `E-Learning` 导入时改成 `Learning Plan`。
+- 每门课写一行 `Course registered`，`Detail` 记文件名；Existing 再用 Audit Owner 和 Audit Date 写 `Audit passed` 或 `Audit failed`。
+
 ## ACTIVITY_LOGS.Action 的值
 
 | 对象 | Action |
@@ -227,7 +249,7 @@ erDiagram
 - 还有 ticket 没关时，这次 audit 至少要留一个 `No`。
 - 全部 ticket 关闭后，自动建一次 re-verification audit（`IsReverification = true`），答案全部是 `Yes`，原本 `N/A` 的保持 `N/A`。
 - 课程等 audit 也是 7 天：停在 Pending audit 超过 7 天就算超时。从课程新增、restore 或排入 re-audit（`COURSES.CreatedAt` 或 `ACTIVITY_LOGS` 里最新的 `Course registered`、`Course restored`、`Re-audit queued`）开始算，不用新字段。
-- Ticket 的 SLA 有两段，都是 7 天：`Status = New` 且 `CreatedAt` 超过 7 天（还没 escalate）；`Status` 是 `Escalated` 或 `Retest Failed`、`FixDate` 是空的、而且 `EscalatedAt` 超过 7 天（还没填 fix date）。这两种在 Dashboard 分开计数、分开提醒。
+- Ticket 的 SLA 有两段，都是 7 天：`Status = New` 且 `SlaStartAt`（空的话用 `CreatedAt`）超过 7 天（还没 escalate）；`Status` 是 `Escalated` 或 `Retest Failed`、`FixDate` 是空的、而且 `EscalatedAt` 超过 7 天（还没填 fix date）。这两种在 Dashboard 分开计数、分开提醒。
 - 一门课同一时间只能有一个人 audit（`LockedById`）；中途离开或取消就放弃这次 audit、解除锁定，不留记录；锁太久没提交（例如超过一天）也要自动解除。
 - 这一轮还有 open ticket 时，Auditor 可以补开 ticket：`AuditId` 是这一轮的 audit，`CreatedById` 是补开的人，`ACTIVITY_LOGS` 记 `Added after audit`。
 - Ticket 还是 `New`（SELM 还没 escalate）时，Auditor 可以改 Category 和 Detail（记 `Edited by auditor`），或直接删除；删除会在 `ACTIVITY_LOGS` 留一笔 `Ticket removed`，`AuditId` 指向那一轮。这一轮最后一张 open ticket 不能删。

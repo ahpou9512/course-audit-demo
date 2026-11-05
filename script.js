@@ -38,7 +38,7 @@ const ticket=id=>S.tickets.find(t=>t.id===id);
 const ticketsOf=cid=>S.tickets.filter(t=>t.courseId===cid);
 const openOf=cid=>ticketsOf(cid).filter(t=>t.status!==CLOSED);
 // two 7-day clocks: raised -> escalated, then escalated -> fix date set
-const slaFrom=t=>t.status==='New'?t.createdAt:(t.status==='Escalated'||t.status==='Retest Failed')&&!t.fixDate?t.escalatedAt:null;
+const slaFrom=t=>t.status==='New'?t.slaStart||t.createdAt:(t.status==='Escalated'||t.status==='Retest Failed')&&!t.fixDate?t.escalatedAt:null;
 const isOverdue=t=>{const s=slaFrom(t);return !!s&&Date.now()-s>7*DAY};
 // a course waiting for audit also has 7 days, counted from when it was added, restored or queued for re-audit
 const pendingSince=c=>Math.max(c.createdAt||0,...S.logs.filter(l=>l.courseId===c.id&&['Course registered','Course restored','Re-audit queued'].includes(l.action)).map(l=>l.ts));
@@ -149,7 +149,7 @@ function vCourses(){
   const counts={};STAGES.forEach(([k])=>counts[k]=0);
   S.courses.forEach(c=>{if(stage(c)!=='disc')counts.all++;counts[stage(c)]++});
   const canAdd=isAud()||isOwner(), myN=S.tickets.filter(t=>t.status!==CLOSED&&t.escalatedBy===user.name).length;
-  return `<div class="head"><h2>Courses</h2>${canAdd?`<button class="btn primary" data-a="addCourse">+ Add course</button>`:''}</div>
+  return `<div class="head"><h2>Courses</h2>${canAdd?`<div class="imp-dl"><button class="btn" data-a="importOpen">Import</button><button class="btn primary" data-a="addCourse">+ Add course</button></div>`:''}</div>
   <div class="toolbar"><div class="chips-bar">${STAGES.map(([k,l])=>`<button class="fchip${k==='disc'?' sep':''}" data-a="filter" data-id="${k}" aria-pressed="${filter===k}">${l} <b>${counts[k]}</b></button>`).join('')}
     ${isSelm()?`<button class="fchip mine" data-a="toggleMine" aria-pressed="${myF}">My tickets <b>${myN}</b></button>`:''}</div>
     </div>
@@ -288,7 +288,7 @@ const canEditInfo=c=>canPrice()&&c.health==='Unhealthy'&&!c.lockedBy;
 function refreshTrail(c){const a=S.audits.find(x=>x.id===c.cycleAuditId),iter=a&&$('#ck-'+a.id)?.closest('.iter');if(!iter)return;
   openEdits.add(a.id);iter.querySelector('.aedit')?.remove();iter.querySelector('.ainfo').insertAdjacentHTML('afterend',editTrail(a));iter.querySelector('.aedit')?.classList.add('fresh')}
 const refreshInfo=c=>{if($('#priceBox'))$('#priceBox').innerHTML=priceView(c);if($('#audBox'))$('#audBox').innerHTML=audView(c)};
-const priceView=c=>`Pricing <b>${fmtPrice(c.price)}</b>${canEditInfo(c)?` <button class="link small" data-a="editPrice" data-id="${c.id}">Edit</button>`:''}`;
+const priceView=c=>`Pricing <b>${c.currency&&c.price!=null?`${esc(c.currency)} `:''}${fmtPrice(c.price)}</b>${canEditInfo(c)?` <button class="link small" data-a="editPrice" data-id="${c.id}">Edit</button>`:''}`;
 const audView=c=>`Audience <b>${esc(c.audience||'—')}</b>${canEditInfo(c)?` <button class="link small" data-a="editAud" data-id="${c.id}">Edit</button>`:''}`;
 // dashboard breakdown cards can be folded away; the choice is remembered per browser
 const FOLD_KEY='course-audit-fold';
@@ -312,7 +312,7 @@ const critChips=a=>{const no=CRITERIA.filter((_,j)=>a.checklist[j]==='No'),yes=a
 // pricing and audience as they were at that audit; a value that differs from the audit before it shows what it was
 const auditInfo=(a,prev)=>{const v=(k,f)=>a[k]===undefined?'—':f(a[k]),moved=k=>prev&&a[k]!==undefined&&prev[k]!==undefined&&prev[k]!==a[k];
   const part=(l,k,f)=>`<span>${l} ${moved(k)?`<s>${esc(f(prev[k]))}</s> → <b class="chg">${esc(v(k,f))}</b>`:`<b>${esc(v(k,f))}</b>`}</span>`;
-  return `<div class="ainfo">${part('Pricing','price',fmtPrice)}${part('Audience','audience',x=>x||'—')}</div>`};
+  return `<div class="ainfo">${part('Pricing','price',x=>x==null?'—':`${a.currency?`${a.currency} `:''}${fmtPrice(x)}`)}${part('Audience','audience',x=>x||'—')}</div>`};
 // the auditor can correct the criteria of the current audit while its tickets are still open
 function critEditor(a){
   return `<div class="crit-edit"><div class="crit">${CRITERIA.map((l,i)=>`<div class="crit-row${a.checklist[i]==='No'?' no':''}"><span>${l}</span>
@@ -696,6 +696,181 @@ function toast(msg){const h=$('#toastHost'),el=document.createElement('div');el.
   h.innerHTML='';h.appendChild(el);setTimeout(()=>{el.classList.add('out');setTimeout(()=>el.remove(),300)},2400)}
 function tlog(t,action,detail){log({courseId:t.courseId,ticketId:t.id,action,detail:detail||''})}
 
+/* ---------- import ---------- */
+// new courses start at Pending audit; existing courses bring their last audit result and open issues with them
+const COURSE_TYPES=['Learning Plan','ILT','On-Demand'];
+const IMP_NEW=['Course Code','Course Name','Type'];
+const IMP_OLD=[...IMP_NEW,'Course Status','Docebo Price','Currency','Audience',...CRITERIA,'Audit Owner','Audit Date','Audit Note','Issue','Category'];
+const IMP_COLS={new:IMP_NEW,old:IMP_OLD};
+const IMP_SHOW=100;
+let imp=null, xlsxLoad=null;
+const impKey=s=>String(s??'').toLowerCase().replace(/[^a-z0-9]/g,'');
+const impText=v=>String(v??'').trim();
+function impType(v){const k=impKey(v);
+  if(k==='learningplan'||k==='elearning')return 'Learning Plan'; // the old sheet's E-Learning is Learning Plan here
+  if(k==='ilt')return 'ILT';
+  if(k==='ondemand'||k==='ondemandclass')return 'On-Demand';
+  return ''}
+function impAnswer(v,i){const k=impText(v).toLowerCase(),a=k==='yes'?'Yes':k==='no'?'No':k==='n/a'||k==='na'?'N/A':'';return answers(i).includes(a)?a:null}
+function impDate(v){
+  if(typeof v==='number'&&window.XLSX){const d=XLSX.SSF.parse_date_code(v);return d?new Date(d.y,d.m-1,d.d).getTime():NaN}
+  const s=impText(v);let m;
+  if(m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/))var y=+m[1],mo=+m[2],d=+m[3];
+  else if(m=s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/))var y=+m[3],mo=+m[1],d=+m[2];
+  else return NaN;
+  const t=new Date(y,mo-1,d);return t.getMonth()===mo-1&&t.getDate()===d?t.getTime():NaN}
+function parseCsv(text){const rows=[];let row=[],cell='',q=false;text=text.replace(/^\uFEFF/,'');
+  for(let i=0;i<text.length;i++){const c=text[i];
+    if(q){if(c==='"'&&text[i+1]==='"'){cell+='"';i++}else if(c==='"')q=false;else cell+=c}
+    else if(c==='"')q=true;
+    else if(c===','){row.push(cell);cell=''}
+    else if(c==='\n'){row.push(cell);rows.push(row);row=[];cell=''}
+    else if(c!=='\r')cell+=c}
+  if(cell||row.length){row.push(cell);rows.push(row)}
+  return rows}
+function loadXlsx(){if(window.XLSX)return Promise.resolve();
+  return xlsxLoad=xlsxLoad||new Promise((ok,no)=>{const s=document.createElement('script');s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';s.onload=ok;s.onerror=()=>{xlsxLoad=null;no(new Error('load'))};document.head.appendChild(s)})}
+async function readRows(file){
+  if(/\.csv$/i.test(file.name))return parseCsv(await file.text());
+  await loadXlsx();
+  const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});
+  return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,raw:true,defval:'',blankrows:true})}
+// turns the file's rows into courses that are ready and rows that are skipped, and never touches the data
+function checkImport(kind,rows){
+  const headAt=rows.findIndex(r=>r.some(v=>impText(v)));
+  if(headAt<0)return {fatal:'This file is empty.'};
+  const col={};rows[headAt].forEach((h,i)=>{const k=impKey(h);if(k&&!(k in col))col[k]=i});
+  const missing=IMP_COLS[kind].filter(h=>!(impKey(h) in col));
+  if(kind==='new'&&CRITERIA.some(h=>impKey(h) in col))return {fatal:'This file has audit columns. Use Import existing courses for it.'};
+  if(missing.length)return {fatal:`This file doesn't match the template. Missing: ${missing.join(', ')}.`};
+  const get=(r,h)=>r[col[impKey(h)]];
+  const groups=new Map(),order=[],ready=[],skipped=[];
+  rows.slice(headAt+1).forEach((r,i)=>{if(!r.some(v=>impText(v)))return;
+    const row=headAt+i+2,code=impText(get(r,'Course Code'));
+    if(!code)return skipped.push({row,code:'—',why:'Course code is missing.'});
+    const k=code.toLowerCase();
+    if(!groups.has(k)){groups.set(k,[]);order.push(k)}
+    groups.get(k).push({row,r})});
+  for(const k of order){const g=groups.get(k),first=g[0].r,row=g[0].row,why=[];
+    const code=impText(get(first,'Course Code')),name=impText(get(first,'Course Name')),type=impType(get(first,'Type'));
+    if(!name)why.push('Course name is missing.');
+    if(!type)why.push(`Type must be ${COURSE_TYPES.join(', ')}.`);
+    if(S.courses.some(c=>c.code.toLowerCase()===k))why.push('Already in the masterlist.');
+    const x={code,name,type,row,warn:S.courses.find(c=>normName(c.name)===normName(name))?.code||''};
+    if(kind==='new'){if(g.length>1)skipped.push(...g.slice(1).map(o=>({row:o.row,code,why:'Same course code appears earlier in this file.'})))}
+    else{
+      const disc=impKey(get(first,'Course Status'));
+      if(disc!=='active'&&disc!=='discontinued')why.push('Course status must be Active or Discontinued.');
+      const isDisc=disc==='discontinued';
+      const price=toPrice(get(first,'Docebo Price'));if(Number.isNaN(price))why.push('Docebo price must be a number of 0 or more.');
+      const currency=impText(get(first,'Currency')).toUpperCase();
+      if(currency&&!/^[A-Z]{3}$/.test(currency))why.push('Currency must be a 3-letter code, like USD or CNY.');
+      if(currency&&price==null)why.push('Currency needs a Docebo price.');
+      const aud=audList(get(first,'Audience')).map(a=>({a,hit:AUDIENCES.find(o=>o.toLowerCase()===a.toLowerCase())}));
+      const badAud=aud.filter(a=>!a.hit).map(a=>a.a);if(badAud.length)why.push(`Unknown audience: ${badAud.join(', ')}.`);
+      const crit=CRITERIA.map((h,i)=>{const v=get(first,h);return impText(v)?impAnswer(v,i):''});
+      // a discontinued course keeps what was recorded, and its answers no longer decide anything
+      if(!isDisc)crit.forEach((v,i)=>{if(v===null)why.push(`"${CRITERIA[i]}" must be ${answers(i).join(', ')}.`)});
+      const anyNo=crit.includes('No');
+      if(!isDisc&&!anyNo&&crit.includes(''))why.push('Answer all 8 criteria, or mark the failed ones No.');
+      const auditor=impText(get(first,'Audit Owner'));if(!auditor)why.push('Audit owner is missing.');
+      const raw=get(first,'Audit Date'),date=impDate(raw);
+      if(!impText(raw))why.push('Audit date is missing.');
+      else if(Number.isNaN(date))why.push('Audit date must look like 2026-10-28.');
+      else if(date>dayStart(Date.now()))why.push("Audit date can't be in the future.");
+      const note=impText(get(first,'Audit Note'));
+      if(isDisc&&!note)why.push('A discontinued course needs its reason in Audit Note.');
+      const issues=[];
+      g.forEach((o,n)=>{const desc=impText(get(o.r,'Issue')),rawCat=impText(get(o.r,'Category')),cat=CATS.find(c=>c.toLowerCase()===rawCat.toLowerCase());
+        if(!desc&&!rawCat){if(n)why.push(`Row ${o.row} repeats this course code with no issue.`);return}
+        if(isDisc)return why.push(`Row ${o.row}: a discontinued course opens no tickets. Move this to Audit Note.`);
+        if(!desc)why.push(`Row ${o.row}: issue description is missing.`);
+        if(!cat)why.push(`Row ${o.row}: category must be one of ${CATS.join(', ')}.`);
+        issues.push({cat:cat||rawCat,desc})});
+      if(!isDisc&&anyNo&&!issues.length)why.push('A No needs at least one issue.');
+      if(!isDisc&&!anyNo&&issues.length)why.push('It has an issue but no criterion is marked No.');
+      Object.assign(x,{disc:isDisc,price:Number.isNaN(price)?null:price,currency,audience:aud.map(a=>a.hit).filter(Boolean).join(', '),crit:crit.map(v=>v||(isDisc?'N/A':'Yes')),auditor,date,note,issues,failed:anyNo&&!isDisc,anyNo})}
+    if(why.length)skipped.push({row,code,why:why.join(' ')});else ready.push(x)}
+  skipped.sort((a,b)=>a.row-b.row);
+  return {ready,skipped}}
+function impChooser(){openModal(`<div class="ov-h"><h3>Import courses</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+  <div class="ov-b"><p class="muted" style="margin:0">Which courses are in your file?</p>
+    <button class="imp-kind" data-a="impKind" data-id="new"><b>New courses</b><span>Not audited yet. They go to Pending audit and the 7-day clock starts.</span></button>
+    <button class="imp-kind" data-a="impKind" data-id="old"><b>Existing courses</b><span>Already audited. Their last result and open issues come with them.</span></button></div>
+  <div class="ov-f"><button class="btn" data-a="close">Cancel</button></div>`)}
+function impUpload(kind,msg){imp={kind};const isNew=kind==='new';
+  openModal(`<div class="ov-h"><h3>Import ${isNew?'new':'existing'} courses</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+  <div class="ov-b"><div class="imp-steps"><b>1.</b> Fill in the template. Keep its column names.<br><b>2.</b> Upload it. You can check everything before anything is added.</div>
+    <div class="imp-dl"><button class="btn sm" data-a="impFile" data-id="${kind}:template">Download template</button><button class="btn sm" data-a="impFile" data-id="${kind}:sample">Download sample file</button></div>
+    <p class="muted small" style="margin:0">${isNew?'Columns: Course Code, Course Name, Type.':'One row per course. A course with several issues gets one more row per issue, with the same Course Code. Columns: course details and status, the 8 criteria, Audit Owner, Audit Date, Audit Note, Issue, Category.'}</p>
+    <label class="imp-drop"><input type="file" id="impFile" accept=".xlsx,.csv" aria-label="Choose an Excel or CSV file"><b>Choose a file</b><span>or drop it here · .xlsx or .csv</span></label>
+    <span class="err" id="impErr">${esc(msg||'')}</span></div>
+  <div class="ov-f">${isAud()?`<button class="btn" data-a="importOpen">Back</button>`:`<button class="btn" data-a="close">Cancel</button>`}</div>`)}
+function impPreview(){const {kind,file,ready,skipped}=imp,n=ready.length,isNew=kind==='new';
+  const failed=ready.filter(x=>x.failed),gone=ready.filter(x=>x.disc).length,pass=n-failed.length-gone,tix=failed.reduce((s,x)=>s+x.issues.length,0);
+  const facts=isNew?`<div class="imp-fact"><b>${n}</b><span>Pending audit</span></div>`
+    :`<div class="imp-fact"><b>${pass}</b><span>Healthy</span></div><div class="imp-fact"><b>${failed.length}</b><span>Unhealthy</span></div>${gone?`<div class="imp-fact"><b>${gone}</b><span>Discontinued</span></div>`:''}<div class="imp-fact"><b>${tix}</b><span>Tickets to open</span></div>`;
+  const more=(len)=>len>IMP_SHOW?`<p class="muted small" style="margin:0">Showing the first ${IMP_SHOW} of ${len}.</p>`:'';
+  const result=x=>isNew?pill('Pending Audit'):pill(x.disc?'Discontinued':x.failed?'Unhealthy':'Healthy')+(x.failed?` <span class="muted small">${x.issues.length} issue${x.issues.length>1?'s':''}</span>`:'');
+  openModal(`<div class="ov-h"><h3>Check ${esc(file)}</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+  <div class="ov-b"><div class="imp-facts">${facts}<div class="imp-fact${skipped.length?' bad':''}"><b>${skipped.length}</b><span>Skipped</span></div></div>
+    ${skipped.length?`<div class="imp-sec"><h4>Skipped · fix these in the file and import again</h4><div class="tbl-wrap"><table class="imp-tbl"><thead><tr><th>Row</th><th>Course</th><th>Reason</th></tr></thead><tbody>${skipped.slice(0,IMP_SHOW).map(s=>`<tr><td>${s.row}</td><td>${esc(s.code)}</td><td>${esc(s.why)}</td></tr>`).join('')}</tbody></table></div>${more(skipped.length)}</div>`:''}
+    ${n?`<div class="imp-sec"><h4>Ready to import</h4><div class="tbl-wrap"><table class="imp-tbl"><thead><tr><th>Course</th><th>Name</th><th>Type</th><th>Result</th></tr></thead><tbody>${ready.slice(0,IMP_SHOW).map(x=>`<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${x.warn?`<div class="warn-line">Same name as ${esc(x.warn)}</div>`:''}</td><td>${esc(x.type)}</td><td>${result(x)}</td></tr>`).join('')}</tbody></table></div>${more(n)}</div>`:'<p style="margin:0">Nothing in this file can be imported yet.</p>'}
+    <span class="err" id="impErr"></span></div>
+  <div class="ov-f"><button class="btn" data-a="impAgain">Choose another file</button><button class="btn primary" data-a="impSave"${n?'':' disabled'}>Import ${n} course${n===1?'':'s'}</button></div>`);
+  $('.modal').classList.add('imp-wide')}
+function importCourse(x,kind,file){
+  const c={id:'C'+S.seq.c++,code:x.code,name:x.name,type:x.type,price:null,audience:'',health:'Pending Audit',auditorStatus:'Pending',auditCount:0,lastAudited:null,lastAuditor:null,lockedBy:null,lockedAt:null,cycleAuditId:null,createdAt:Date.now()};
+  S.courses.push(c);log({courseId:c.id,action:'Course registered',detail:`Imported from ${file}`});
+  if(kind==='new')return;
+  c.price=x.price;c.currency=x.currency;c.audience=x.audience;c.lastAudited=x.date;c.lastAuditor=x.auditor;
+  const a={id:'A'+S.seq.a++,courseId:c.id,date:x.date,result:x.anyNo?'Failed':'Passed',auditor:x.auditor,checklist:x.crit,price:x.price,currency:x.currency,audience:x.audience,issues:x.issues.map(i=>({...i})),note:`Imported from file${x.note?` · ${x.note}`:''}`};
+  S.audits.push(a);
+  if(x.disc){
+    c.health='Discontinued';c.auditorStatus='Completed';
+    log({ts:x.date,actor:x.auditor,courseId:c.id,action:'Course discontinued',detail:x.note});
+  }else if(x.failed){
+    // Raised keeps the audit date; the 7 days to escalate start today, when the SELMs first see the ticket
+    const made=x.issues.map(i=>{const t={id:'TKT-'+S.seq.t++,courseId:c.id,auditId:a.id,category:i.cat,detail:i.desc,status:'New',createdAt:x.date,slaStart:Date.now(),createdBy:x.auditor,escalatedAt:null,escalatedBy:null,fixDate:null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};S.tickets.push(t);return t});
+    c.health='Unhealthy';c.auditorStatus='In Progress';c.cycleAuditId=a.id;
+    log({ts:x.date,actor:x.auditor,courseId:c.id,ticketIds:made.map(t=>t.id),action:'Audit failed',detail:`${made.length} ticket(s) created: ${made.map(t=>`${t.id} ${t.category}`).join(', ')} · imported`});
+  }else{
+    c.health='Healthy';c.auditorStatus='Completed';c.auditCount=1;
+    log({ts:x.date,actor:x.auditor,courseId:c.id,action:'Audit passed',detail:'Iteration 1 · imported'})}}
+function impSampleRows(kind){
+  const ymd=d=>toInput(Date.now()-d*DAY);
+  if(kind==='new')return [['DEMO-N101','Storage Fundamentals','Learning Plan'],['DEMO-N102','Networking Essentials','On-Demand'],['DEMO-N103','Server Administration Workshop','ILT'],['DEMO-N104','Cloud Basics','On-Demand'],['DEMO-N105','Data Protection Overview','Learning Plan'],['DEMO-N101','Storage Fundamentals (entered twice)','Learning Plan'],['DEMO-N106','Security Awareness','Webinar']];
+  const y=(...no)=>CRITERIA.map((_,i)=>no.includes(i)?'No':'Yes'),row=(code,name,type,status,price,cur,aud,crit,who,d,note='',issue='',cat='')=>[code,name,type,status,price,cur,aud,...crit,who,ymd(d),note,issue,cat];
+  const more=(code,issue,cat)=>[code,'','','','','','',...CRITERIA.map(()=>''),'','','',issue,cat];
+  return [row('DEMO-E201','Hyperconverged Infrastructure Overview','Learning Plan','Active',0,'','Partner',y(),'Rick',5),
+    row('DEMO-E202','Backup and Recovery Workshop','ILT','Active',320,'USD','Customer, Partner',y(),'Calvin',4,'Fixed: added the Partner audience'),
+    row('DEMO-E203','Client Devices Sales Basics','On-Demand','Active',160,'USD','DSP, Partner',['N/A',...y().slice(1)],'Rick',3),
+    row('DEMO-E204','Virtualization Administration','ILT','Active',7800,'CNY','Partner',y(1),'Calvin',12,'','Course description PDF will not open','CD PDF'),
+    row('DEMO-E205','Modern Data Center Foundations','Learning Plan','Active',100,'USD','Customer',y(3,7),'Rick',3,'','Launch link goes to a retired page','Course Setup'),
+    more('DEMO-E205','Completion is not recorded after the final module','IT issue'),
+    row('DEMO-E206','Edge Computing Essentials','On-Demand','Active',0,'','Partner',y(2),'Calvin',2),
+    row('DEMO-E207','Legacy Storage Administration','ILT','Discontinued',480,'USD','Partner',y(0,1,2,3,4,5,6,7),'Rick',20,'Replaced by DEMO-E201')]}
+async function impDownload(kind,what){
+  const name=`${what==='sample'?'sample':'template'}-${kind==='new'?'new':'existing'}-courses.xlsx`,aoa=[IMP_COLS[kind],...(what==='sample'?impSampleRows(kind):[])];
+  try{await loadXlsx()}catch(e){return toast("Couldn't load the Excel library. Check your connection.")}
+  const ws=XLSX.utils.aoa_to_sheet(aoa);ws['!cols']=IMP_COLS[kind].map(h=>({wch:Math.max(14,Math.min(34,h.length+2))}));
+  const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'Courses');
+  const data=XLSX.write(wb,{type:'array',bookType:'xlsx'});
+  const dl=window.claude?.use?await window.claude.use('downloads'):null;
+  if(dl){try{await dl.save({filename:name,data:new Blob([data])})}catch(e){if(e?.code!=='declined')toast("That file couldn't be saved here.")}return}
+  if(window.claude?.use)return toast("Downloads aren't available in this view.");
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+async function impRead(input){const file=input.files[0],kind=imp?.kind;if(!file||!kind)return;
+  const fail=m=>impUpload(kind,m);
+  if(!/\.(xlsx|csv)$/i.test(file.name))return fail('Choose an .xlsx or .csv file.');
+  $('#impErr').textContent='';$('.imp-drop b').textContent='Reading…';
+  let rows;
+  try{rows=await readRows(file)}catch(e){return fail(e?.message==='load'?"Couldn't load the Excel reader. Check your connection, or save the file as .csv.":"This file couldn't be read. Save it again as .xlsx or .csv.")}
+  if(!imp||imp.kind!==kind)return;
+  const res=checkImport(kind,rows);
+  if(res.fatal)return fail(res.fatal);
+  imp={kind,file:file.name,...res};impPreview()}
+
 const A={
   go(id){go(id)},
   open(id){go('course',id)},
@@ -704,6 +879,15 @@ const A={
   filter(id){filter=id;refreshRows()},
   leaveAudit(){const next=leaveNext;leaveNext=null;closeOv();draftStart=JSON.stringify(draft);next?.()},
   goFilter(id){if(leaveGuard(()=>A.goFilter(id)))return;filter=id;go('courses')},
+  importOpen(){if(!isAud()&&!isOwner())return;imp=null;if(isAud())impChooser();else impUpload('new')},
+  impKind(k){if(k==='old'&&!isAud())return;impUpload(k)},
+  impFile(id){const [k,w]=id.split(':');impDownload(k,w)},
+  impAgain(){impUpload(imp.kind)},
+  impSave(){const {kind,file,ready,skipped}=imp,snap=JSON.stringify(S);
+    ready.forEach(x=>importCourse(x,kind,file));
+    try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){if(/quota/i.test(e?.name||'')){S=JSON.parse(snap);$('#impErr').textContent="There isn't enough browser storage for this many courses. Nothing was imported.";return}}
+    closeOv();imp=null;filter='all';search='';catFilter='';tkF='';auditedF='';myF=false;page=1;go('courses');
+    toast(`${ready.length} course${ready.length===1?'':'s'} imported${skipped.length?` · ${skipped.length} skipped`:''}`)},
   addCourse(){openModal(`<form id="addForm" novalidate style="display:contents"><div class="ov-h"><h3>Add a course</h3><button type="button" class="x" data-a="close" aria-label="Close">×</button></div>
     <div class="ov-b"><label class="field"><span class="req">Course code</span><input type="text" id="nCode" placeholder="e.g. ESSTGD04406"></label>
     <label class="field"><span class="req">Course name</span><input type="text" id="nName"></label>
@@ -972,6 +1156,7 @@ document.addEventListener('change',e=>{
   else if(['catFilter','auditedF'].includes(t.id)){
     ({catFilter:v=>catFilter=v,auditedF:v=>auditedF=v})[t.id](t.value);
     t.classList.toggle('on',!!t.value);refreshRows()}
+  else if(t.id==='impFile')impRead(t);
   else if(t.id==='rFrom'){rptFrom=fromInput(t.value);render()}
   else if(t.id==='rTo'){rptTo=fromInput(t.value);render()}
   else if(t.id?.startsWith('iCat'))draft.issues[+t.dataset.i].cat=t.value;
