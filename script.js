@@ -154,7 +154,7 @@ function vCourses(){
     ${isSelm()?`<button class="fchip mine" data-a="toggleMine" aria-pressed="${myF}">My tickets <b>${myN}</b></button>`:''}</div>
     </div>
   <div class="tk-legend" role="group" aria-label="Highlight tickets"><span class="lbl">Highlight tickets</span>${TK_OPTS.map(([v,l])=>`<button class="lchip" data-a="tkHl" data-id="${v}" aria-pressed="${tkF===v}">${v==='closed'?'<span class="dot chk">✓</span>':`<span class="dot ${tone(v==='verify'?PV_RES:v)}"></span>`}${l} <b>${tkCount(v)}</b></button>`).join('')}</div>
-  <div class="tbl-wrap"><table class="courses-tbl"><colgroup><col style="width:24%"><col style="width:14%"><col style="width:32%"><col style="width:14%"><col style="width:16%"></colgroup>
+  <div class="tbl-wrap"><table class="courses-tbl"><colgroup><col style="width:22%"><col style="width:20%"><col style="width:30%"><col style="width:13%"><col style="width:15%"></colgroup>
     <thead><tr><th>Course</th><th>Status</th><th>Issue categories</th><th>Last audited</th><th>Next step</th></tr>
     <tr class="frow"><th><input type="search" id="search" placeholder="Search code or name" value="${esc(search)}" aria-label="Search courses"></th>
     <th>${fsel('statusF',filter==='all'?'':filter,'All statuses',STAGES.slice(1),'Filter by status')}</th>
@@ -206,14 +206,20 @@ function refreshRows(keepPage){
   });
 }
 const PAGE=10;
+// the first page, the last page and the ones around the current page; null marks a gap, and a gap of one page just shows that page
+function pageNums(pages){const out=[];let last=0;
+  for(let n=1;n<=pages;n++){if(n!==1&&n!==pages&&Math.abs(n-page)>1)continue;
+    if(n-last===2)out.push(n-1);else if(n-last>2)out.push(null);
+    out.push(n);last=n}
+  return out}
 // "Showing 11–20 of 23" and page buttons; nothing when everything fits on one page
 function pagerHtml(){
   const pages=Math.ceil(rowTotal/PAGE);if(pages<=1)return '';
   const from=(page-1)*PAGE+1,to=Math.min(page*PAGE,rowTotal);
   return `<span class="muted small">Showing ${from}–${to} of ${rowTotal}</span><div class="pg">
     <button class="btn sm" data-a="pg" data-id="${page-1}"${page===1?' disabled':''}>‹ Prev</button>
-    ${Array.from({length:pages},(_,i)=>i+1).map(n=>`<button class="btn sm${n===page?' on':''}" data-a="pg" data-id="${n}" aria-current="${n===page}">${n}</button>`).join('')}
-    <button class="btn sm" data-a="pg" data-id="${page+1}"${page===pages?' disabled':''}>Next ›</button></div>`;
+    ${pageNums(pages).map(n=>n==null?'<span class="pg-gap" aria-hidden="true">…</span>':`<button class="btn sm${n===page?' on':''}" data-a="pg" data-id="${n}" aria-current="${n===page}">${n}</button>`).join('')}
+    <button class="btn sm" data-a="pg" data-id="${page+1}"${page===pages?' disabled':''}>Next ›</button>${pages>5?`<span class="pg-go"><label for="pgGo">Go to page</label><input type="text" id="pgGo" inputmode="numeric" autocomplete="off" placeholder="1–${pages}"><button class="btn sm" data-a="pgGo">Go</button></span>`:''}</div>`;
 }
 function courseRows(){
   const q=search.trim().toLowerCase();
@@ -919,6 +925,9 @@ const A={
     $('.fchip.mine')?.setAttribute('aria-pressed',myF);
     document.querySelectorAll('#tree .tree-kid').forEach(k=>k.classList.toggle('faded',myF&&ticket(k.dataset.slot)?.escalatedBy!==user.name))},
   pg(n){page=+n;refreshRows(true);$('.tbl-wrap')?.scrollIntoView({behavior:'smooth',block:'nearest'})},
+  // a number past the end goes to the last page; an empty box or 0 stays where it is
+  pgGo(){const box=$('#pgGo'),n=parseInt(box.value,10);if(!n){box.value='';return box.focus()}
+    A.pg(Math.min(n,Math.ceil(rowTotal/PAGE)));$('#pgGo')?.focus({preventScroll:true})},
   editTk(id){if(Date.now()-(justSaved[id]||0)<500)return;swapAud(id,audEdit(ticket(id)));$('#ekDesc-'+id)?.focus()},
   cancelTk(id){swapAud(id,audAct(ticket(id)))},
   saveTk(id){const t=ticket(id),cat=$('#ekCat-'+id).value,desc=$('#ekDesc-'+id).value.trim();
@@ -1145,6 +1154,7 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='Escape'&&focusT)closeFocus();
   if(e.target.id==='priceIn'&&(e.key==='Enter'||e.key==='Escape')){e.preventDefault();A[e.key==='Enter'?'savePrice':'cancelPrice'](e.target.closest('.price-edit').querySelector('[data-a=savePrice]').dataset.id)}
   if(e.key==='Enter'&&e.target.matches('tr.click'))A.open(e.target.dataset.id);
+  if(e.key==='Enter'&&e.target.id==='pgGo'){e.preventDefault();A.pgGo()}
 });
 document.addEventListener('change',e=>{
   const t=e.target;
@@ -1163,6 +1173,7 @@ document.addEventListener('change',e=>{
 });
 document.addEventListener('input',e=>{
   const t=e.target;
+  if(t.id==='pgGo'){t.value=t.value.replace(/\D/g,'');return}
   // pricing boxes are plain text boxes that keep only digits and one decimal point (2 places)
   if(t.id==='fPrice'||t.id==='priceIn'){const v=t.value.replace(/[^\d.-]|(?!^)-/g,'').replace(/(\..*)\./g,'$1').replace(/(\.\d{2})\d+/,'$1');if(v!==t.value)t.value=v}
   if(t.id?.startsWith('iDesc'))draft.issues[+t.dataset.i].desc=t.value;
