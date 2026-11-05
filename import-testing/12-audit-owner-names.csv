@@ -1,0 +1,4 @@
+﻿Course Code,Course Name,Type,Course Status,Docebo Price,Currency,Audience,Search on Dell Learning works,Course Description (PDF) works,Enrollment works,Launch URL works,Course launches on first attempt,No error page,No access denied,Completion recorded,Audit Owner,Audit Date,Audit Note,Issue,Category
+DT-A1,Test Unknown Owner,ILT,Active,100,USD,Partner,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Zed,2026-10-20,,,
+DT-A2,Test Lowercase Owner,ILT,Active,100,USD,Partner,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,rick,2026-10-20,,,
+DT-A3,Test SELM As Owner,ILT,Active,100,USD,Partner,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Gary,2026-10-20,,,

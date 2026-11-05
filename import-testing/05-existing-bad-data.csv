@@ -1,0 +1,14 @@
+﻿Course Code,Course Name,Type,Course Status,Docebo Price,Currency,Audience,Search on Dell Learning works,Course Description (PDF) works,Enrollment works,Launch URL works,Course launches on first attempt,No error page,No access denied,Completion recorded,Audit Owner,Audit Date,Audit Note,Issue,Category
+,No code,ILT,Active,100,USD,Partner,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-10-20,,,
+DT-B1,,ILT,Active,100,USD,Partner,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-10-20,,,
+DT-B2,Bad type,Webinar,Active,100,USD,Partner,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-10-20,,,
+DT-B3,Bad status,ILT,Retired,100,USD,Partner,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-10-20,,,
+DT-B4,Bad price,ILT,Active,"1,600",USD,Partner,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-10-20,,,
+DT-B5,Bad currency,ILT,Active,100,RMB2,Partner,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-10-20,,,
+DT-B6,Bad audience,ILT,Active,100,USD,Parter,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-10-20,,,
+DT-B7,NA not allowed here,ILT,Active,100,USD,Partner,Yes,Yes,Yes,N/A,Yes,Yes,Yes,Yes,Rick,2026-10-20,,,
+DT-B8,No without issue,ILT,Active,100,USD,Partner,No,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-10-20,,,
+DT-B9,Issue without No,ILT,Active,100,USD,Partner,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-10-20,,Something,Other
+DT-B10,Two categories,ILT,Active,100,USD,Partner,No,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-10-20,,Something,"CD PDF, Content"
+DT-B11,Future date,ILT,Active,100,USD,Partner,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2099-01-01,,,
+DT-B12,Discontinued with no reason,ILT,Discontinued,100,USD,Partner,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-10-20,,,
