@@ -151,7 +151,7 @@ function vCourses(){
 }
 
 const TK_OPTS=[['New','New'],['Escalated','Escalated'],['In Progress','In Progress'],['Retest Failed','Retest Failed'],['verify','Waiting for verification'],['closed','Closed']];
-const tkIs=(t,v)=>v==='verify'?t.status===PV_RES||t.status===PV_DIS:v==='closed'?t.status===CLOSED:t.status===v;
+const tkIs=(t,v)=>v==='open'?t.status!==CLOSED:v==='verify'?t.status===PV_RES||t.status===PV_DIS:v==='closed'?t.status===CLOSED:t.status===v;
 const tkMatch=t=>tkIs(t,tkF);
 const tkCount=v=>S.courses.flatMap(shownOf).filter(t=>tkIs(t,v)).length; // tickets the table shows in that state
 // category and My tickets narrow the course list; the ticket status filter only highlights, so no course is hidden by it
@@ -468,7 +468,7 @@ function submitAudit(){
         <div class="ov-b"><p style="margin:0">${n} criteri${n>1?'a':'on'} marked No. The course changes from Healthy to Unhealthy and ${k} ticket${k>1?'s are':' is'} created.</p></div>
         <div class="ov-f"><button class="btn" data-a="close">Back to form</button><button class="btn danger" data-a="confirmFail">Mark Unhealthy</button></div>`)}
     const a=addAudit(c,'Failed',draft.crit.map(v=>v||'Yes'),info,draft.issues.map(x=>({...x})));
-    const made=draft.issues.map(x=>{const t={id:'TKT-'+S.seq.t++,courseId:c.id,auditId:a.id,category:x.cat,detail:x.desc.trim(),status:'New',createdAt:ts,
+    const made=draft.issues.map(x=>{const t={id:'TKT-'+S.seq.t++,courseId:c.id,auditId:a.id,category:x.cat,detail:x.desc.trim(),status:'New',createdAt:ts,createdBy:user.name,
       escalatedAt:null,escalatedBy:null,fixDate:null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};S.tickets.push(t);return t});
     c.health='Unhealthy';c.auditorStatus='In Progress';c.cycleAuditId=a.id;c.lastAudited=ts;c.lastAuditor=user.name;
     log({courseId:c.id,ticketIds:made.map(t=>t.id),action:'Audit failed',detail:`${made.length} ticket(s) created: ${made.map(t=>`${t.id} ${t.category}`).join(', ')}${started}`});
@@ -525,20 +525,21 @@ function vDash(){
   const buckets={};etaT.forEach(t=>{const k=week(t.fixDate);(buckets[k]=buckets[k]||[]).push(t)});
   const bKeys=Object.keys(buckets).sort((a,b)=>a==='TBD'?1:b==='TBD'?-1:Math.min(...buckets[a].map(t=>t.fixDate))-Math.min(...buckets[b].map(t=>t.fixDate)));
   const maxB=Math.max(1,...bKeys.map(k=>buckets[k].length));
-  const m=(v,l,t)=>`<div class="metric" style="--tone:var(${t})"><b>${v}</b><span>${l}</span></div>`;
-  const tm=(v,l,t)=>`<div class="metric" style="--tone:var(${t})"><b>${v}</b><span>${l}</span></div>`;
+  // every card opens the Courses page: course cards filter by status, ticket cards bring those tickets' courses to the top
+  const m=(v,l,t,k)=>`<button class="metric" data-a="dashGo" data-id="c:${k}" style="--tone:var(${t})"><b>${v}</b><span>${l}</span></button>`;
+  const tm=(v,l,t,k)=>`<button class="metric" data-a="dashGo" data-id="t:${k}" style="--tone:var(${t})"><b>${v}</b><span>${l}</span></button>`;
   const from=rptFrom??dayStart(Date.now()-6*DAY), to=rptTo??dayStart(Date.now());
   const inR=S.logs.filter(l=>l.ts>=from&&l.ts<to+DAY), cnt=a=>inR.filter(l=>l.action===a).length;
   return `<div class="head"><h2>Dashboard</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-a="samples">${S.courses.some(c=>c.sample)?'Remove 7-day samples':'Add 7-day samples'}</button><button class="btn sm" data-a="reset">Clear all data</button></div></div>
   <span class="sec-label">Courses</span>
-  <div class="metric hero" style="--tone:var(--accent)"><b>${cs.all}</b><span>Active courses</span>${foldBtn('courses')}</div>
+  <div class="metric hero" style="--tone:var(--accent)"><button class="hero-link" data-a="dashGo" data-id="c:all"><b>${cs.all}</b><span>Active courses</span></button>${foldBtn('courses')}</div>
   <div class="fold-box${fold.courses?' shut':''}" id="fold-courses"><div class="metrics">${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to revalidate','--pv','verify')}${m(cs.audit,'Pending audit','--warn','audit')}</div></div>
   ${notEsc.length?`<div class="alert"><span>⚠</span><div><b>${notEsc.length} ticket${notEsc.length>1?'s':''} not escalated within 7 days.</b> SELM and Auditor groups notified: ${tkLinks(notEsc,'notEsc')}</div></div>`:''}
   ${noFix.length?`<div class="alert"><span>⚠</span><div><b>${noFix.length} ticket${noFix.length>1?'s':''} with no fix date 7 days after escalation.</b> SELM and Auditor groups notified: ${tkLinks(noFix,'noFix')}</div></div>`:''}
   ${missed.length?`<div class="alert"><span>⚠</span><div><b>${missed.length} ticket${missed.length>1?'s':''} past the fix date.</b> ${tkLinks(missed,'missed')}</div></div>`:''}
   <span class="sec-label">Tickets</span>
-  <div class="metric hero" style="--tone:var(--accent)"><b>${open.length}</b><span>Open tickets</span><small class="hero-sla${overdue.length||missed.length?' bad':''}">${notEsc.length} not escalated in 7d · ${noFix.length} no fix date in 7d · ${missed.length} ETA missed</small>${foldBtn('tickets')}</div>
-  <div class="fold-box${fold.tickets?' shut':''}" id="fold-tickets"><div class="metrics">${tm(S.tickets.filter(t=>t.status==='New').length,'New','--warn')}${tm(S.tickets.filter(t=>t.status==='Retest Failed').length,'Sent back','--bad')}${tm(S.tickets.filter(t=>t.status==='Escalated').length,'Escalated','--info')}${tm(S.tickets.filter(t=>t.status==='In Progress').length,'In Progress','--accent')}${tm(S.tickets.filter(t=>t.status===PV_RES||t.status===PV_DIS).length,'Waiting for verification','--pv')}</div></div>
+  <div class="metric hero" style="--tone:var(--accent)"><button class="hero-link" data-a="dashGo" data-id="t:open"><b>${open.length}</b><span>Open tickets</span></button><small class="hero-sla${overdue.length||missed.length?' bad':''}">${notEsc.length} not escalated in 7d · ${noFix.length} no fix date in 7d · ${missed.length} ETA missed</small>${foldBtn('tickets')}</div>
+  <div class="fold-box${fold.tickets?' shut':''}" id="fold-tickets"><div class="metrics">${tm(S.tickets.filter(t=>t.status==='New').length,'New','--warn','New')}${tm(S.tickets.filter(t=>t.status==='Retest Failed').length,'Retest Failed','--bad','Retest Failed')}${tm(S.tickets.filter(t=>t.status==='Escalated').length,'Escalated','--info','Escalated')}${tm(S.tickets.filter(t=>t.status==='In Progress').length,'In Progress','--accent','In Progress')}${tm(S.tickets.filter(t=>t.status===PV_RES||t.status===PV_DIS).length,'Waiting for verification','--pv','verify')}</div></div>
   <div class="grid2">
     <div class="panel"><h3>Open tickets by category</h3><div class="bars">${catCounts.length?catCounts.map(([c,n])=>`<div class="bar"><span>${esc(c)}</span><div class="track"><div class="fill" style="width:${n/maxC*100}%"></div></div><span class="v">${n}</span></div>`).join(''):'<span class="muted">No open tickets</span>'}</div></div>
     <div class="panel"><h3>Fix ETA by week</h3><div class="bars">${bKeys.length?bKeys.map(k=>`<div class="bar"><span class="mono">${k}</span><div class="track"><div class="fill" style="width:${buckets[k].length/maxB*100}%;${k==='TBD'?'background:var(--warn)':''}"></div></div><span class="v">${buckets[k].length}</span></div>`).join(''):'<span class="muted">Nothing scheduled</span>'}</div></div>
@@ -562,7 +563,7 @@ const REVERIFY='Re-verification after fixes';
 const inPeriod=t=>{if(teamP==='all')return true;const n=new Date();return t>=new Date(n.getFullYear(),n.getMonth(),1).getTime()};
 function auditorStats(name){
   const all=S.audits.filter(a=>a.auditor===name), runs=all.filter(a=>a.note!==REVERIFY&&inPeriod(a.date));
-  return {audits:runs.length,courses:new Set(runs.map(a=>a.courseId)).size,issues:runs.reduce((n,a)=>n+(a.issues?.length||0),0),
+  return {audits:runs.length,courses:new Set(runs.map(a=>a.courseId)).size,issues:S.tickets.filter(t=>t.createdBy===name&&inPeriod(t.createdAt)).length,
     verified:S.logs.filter(l=>l.actor===name&&l.action==='Ticket closed'&&inPeriod(l.ts)).length,last:all.length?Math.max(...all.map(a=>a.date)):null};
 }
 const periodChips=()=>`<div class="chips-bar">${[['month','This month'],['all','All time']].map(([k,l])=>`<button class="fchip" data-a="teamP" data-id="${k}" aria-pressed="${teamP===k}">${l}</button>`).join('')}</div>`;
@@ -641,7 +642,7 @@ function addSamples(){const now=Date.now(),ago=d=>now-d*DAY,price=299;
     const a={id:'A'+S.seq.a++,courseId:c.id,date:ago(raisedAgo),result:'Failed',auditor:'Rick',checklist:CRITERIA.map((_,i)=>i?'Yes':'No'),price,audience:'Partner',issues:tickets.map(t=>({cat:t.cat,desc:t.desc})),note:''};
     c.cycleAuditId=a.id;S.courses.push(c);S.audits.push(a);
     log({ts:ago(raisedAgo),actor:'Rick',courseId:c.id,action:'Audit failed',detail:`${tickets.length} ticket(s) created`});
-    tickets.forEach(x=>{const t={id:'TKT-'+S.seq.t++,courseId:c.id,auditId:a.id,category:x.cat,detail:x.desc,status:x.status,createdAt:ago(x.raised),escalatedAt:x.esc?ago(x.esc):null,escalatedBy:x.by||null,fixDate:x.fix?ago(x.fix):null,firstFix:x.first?ago(x.first):null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};
+    tickets.forEach(x=>{const t={id:'TKT-'+S.seq.t++,courseId:c.id,auditId:a.id,category:x.cat,detail:x.desc,status:x.status,createdAt:ago(x.raised),createdBy:'Rick',escalatedAt:x.esc?ago(x.esc):null,escalatedBy:x.by||null,fixDate:x.fix?ago(x.fix):null,firstFix:x.first?ago(x.first):null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};
       S.tickets.push(t);
       const at=(d,actor,action,detail)=>log({ts:ago(d),actor,courseId:c.id,ticketId:t.id,action,detail});
       if(x.esc)at(x.esc,x.by,'Escalated','');
@@ -730,13 +731,15 @@ const A={
   cancelAddTk(){$('#tkAdd')?.remove()},
   doAddTk(id){const c=course(id),cat=$('#tkCat').value,desc=$('#tkDesc').value.trim();
     if(!cat||!desc){$('#tkErr').textContent=!cat?'Choose a category.':'Describe what is wrong.';return (!cat?$('#tkCat'):$('#tkDesc')).focus()}
-    const t={id:'TKT-'+S.seq.t++,courseId:id,auditId:c.cycleAuditId,category:cat,detail:desc,status:'New',createdAt:Date.now(),
+    const t={id:'TKT-'+S.seq.t++,courseId:id,auditId:c.cycleAuditId,category:cat,detail:desc,status:'New',createdAt:Date.now(),createdBy:user.name,
       escalatedAt:null,escalatedBy:null,fixDate:null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};
     S.tickets.push(t);c.health='Unhealthy';tlog(t,'Added after audit',cat);flashId=t.id;save();render();toast(`${t.id} added`)},
   toggleEdits(id){const box=$('#ae-'+id),open=!openEdits.has(id);open?openEdits.add(id):openEdits.delete(id);
     box.classList.toggle('open',open);box.querySelector('[data-a=toggleEdits]').textContent=open?'Hide changes':'Show changes'},
   toggleHist(id){const h=$('#hist-'+id),b=document.querySelector(`[data-a=toggleHist][data-id="${id}"]`),open=!openHist.has(id),n=+b.dataset.n;
     open?openHist.add(id):openHist.delete(id);h.classList.add('reveal');h.classList.toggle('open',open);b.textContent=open?'Show less':`Show ${n} earlier audit${n>1?'s':''}`},
+  dashGo(id){const [kind,k]=[id.slice(0,1),id.slice(2)];search='';catFilter='';auditedF='';myF=false;page=1;
+    filter=kind==='c'?k:'all';tkF=kind==='t'?k:'';go('courses')},
   tkHl(id){tkF=tkF===id?'':id;refreshRows()},
   clearF(){search='';catFilter='';tkF='';auditedF='';filter='all';myF=false;
     $('#search').value='';['statusF','catFilter','auditedF'].forEach(id=>{$('#'+id).value='';$('#'+id).classList.remove('on')});refreshRows()},
@@ -958,6 +961,8 @@ S=load(); if(!S||!S.seq)fresh();
 [...S.courses,...S.audits].forEach(x=>{if(typeof x.price==='string'){const p=toPrice(x.price);x.price=Number.isNaN(p)?null:p}});
 // the E-Learning course type is now called Learning Plan
 S.courses.forEach(c=>{if(c.type==='E-Learning')c.type='Learning Plan'});
+// older tickets don't say who opened them: the auditor who added it later, otherwise the auditor of its audit
+S.tickets.forEach(t=>{if(!t.createdBy)t.createdBy=S.logs.find(l=>l.ticketId===t.id&&l.action==='Added after audit')?.actor||S.audits.find(a=>a.id===t.auditId)?.auditor||''});
 // fix date moves no longer wait for approval; drop any request saved by the earlier version
 S.tickets.forEach(t=>{delete t.fixReq});
 // older data only recorded passed audits as "last audited"; take the latest audit of any result

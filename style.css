@@ -156,6 +156,8 @@ tr.click:hover td{background:var(--surface-2)}
 .metric{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:2px;border-top:3px solid var(--tone,var(--line));text-align:left;cursor:default}
 button.metric{cursor:pointer;font:inherit;color:inherit}
 button.metric:hover{border-color:var(--muted);border-top-color:var(--tone)}
+.hero-link{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:4px;width:fit-content}
+.hero-link:hover span{text-decoration:underline}
 .metric b{font-family:var(--f-display);font-size:26px;font-variant-numeric:tabular-nums;line-height:1.1}
 .metric span{font-size:12.5px;color:var(--muted)}
 .metric.hero{width:100%;padding:22px 26px;border-top-width:4px;border-radius:12px;gap:4px}
