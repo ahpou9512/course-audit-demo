@@ -48,6 +48,7 @@ function auditFlag(c){if(stage(c)!=='audit')return '';const d=daysSince(pendingS
   if(auditLate(c))return `<span class="aud-sla late">${d}d not audited</span>`;
   return `<span class="aud-sla">${AUDIT_DAYS-d>0?`${AUDIT_DAYS-d}d left to audit`:'Last day to audit'}</span>`}
 // a Healthy course whose latest audit had tickets cancelled instead of fixed says so, until the next audit
+const fullAudits=c=>S.audits.filter(a=>a.courseId===c.id&&a.note!==REVERIFY);
 function cancelFlag(c){if(stage(c)!=='healthy')return '';const last=S.audits.filter(a=>a.courseId===c.id&&a.note!==REVERIFY).sort((a,b)=>b.date-a.date)[0];
   const n=last?S.tickets.filter(t=>t.auditId===last.id&&t.closedAs==='Cancelled').length:0;return n?`<span class="aud-sla cancelled">${n} ticket${n>1?'s':''} cancelled</span>`:''}
 // fix date tracking: how often it moved and whether it was missed
@@ -289,7 +290,7 @@ function vCourse(){
   else if(st==='audit'&&isAud()&&!c.lockedBy)btn=`<button class="btn primary" data-a="startAudit" data-id="${c.id}">Start audit</button>`;
   else if(st==='healthy'&&!c.lockedBy&&isAud())btn=`<button class="btn" data-a="reaudit" data-id="${c.id}">Re-audit</button>`;
   else if(st==='audit'&&!isAud())btn=`<span class="muted small">Waiting for an auditor</span>`;
-  const stats=`<div class="stats"><span>Audits <b>${runs.length}</b></span><span${auditOld(c)?' class="audit-old"':''}>Last audited <b>${fmtD(c.lastAudited)}</b>${c.lastAudited?` (${daysSince(c.lastAudited)}d ago)`:''}</span>
+  const stats=`<div class="stats"><span>Audits <b>${fullAudits(c).length}</b></span><span${auditOld(c)?' class="audit-old"':''}>Last audited <b>${fmtD(c.lastAudited)}</b>${c.lastAudited?` (${daysSince(c.lastAudited)}d ago)`:''}</span>
       <span>By <b>${esc(c.lastAuditor||'—')}</b></span><span id="priceBox">${priceView(c)}</span><span id="audBox">${audView(c)}</span>${c.learningPlan?`<span>${c.learningPlan.includes(',')?'Learning plans':'Learning plan'} <b class="mono">${esc(c.learningPlan)}</b></span>`:''}</div>`;
   return `<button class="link back" data-a="go" data-id="courses">← All courses</button>
   <div class="panel cover${st==='disc'?' gone':''}"><div class="chead"><div style="display:flex;flex-direction:column;gap:6px">
@@ -304,7 +305,7 @@ function vCourse(){
     ${closed.length?`<details><summary>Closed tickets (${closed.length})${closed.some(t=>t.selfApproved)?` · <span class="tk-self-n">${closed.filter(t=>t.selfApproved).length} self-approved</span>`:''}</summary><div class="tree-kids closed-kids">${closed.map(t=>`<div class="tree-kid" data-slot="${t.id}">${ticketRow(c,t,st)}</div>`).join('')}</div></details>`:''}</div>`:''}
   ${infoLog(c)}
   <div class="panel"><h3>Audit history</h3>
-    ${runs.length?`<div class="hist${openHist.has(c.id)?' open':''}" id="hist-${c.id}">${runs.map((a,i)=>`<div class="iter${i>=3?' old':''}"><span class="n">#${runs.length-i}</span><span class="mono">${fmtD(a.date)}</span>
+    ${runs.length?`<div class="hist${openHist.has(c.id)?' open':''}" id="hist-${c.id}">${runs.map((a,i)=>`<div class="iter${i>=3?' old':''}"><span class="n">${a.note===REVERIFY?'✓':`#${runs.slice(i).filter(x=>x.note!==REVERIFY).length}`}</span><span class="mono">${fmtD(a.date)}</span>
       <div class="body" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${pill(a.result)}<span>${esc(a.auditor)}</span>${a.note?`<span class="muted small">${esc(a.note)}</span>`:''}
         ${a.checklist&&isAud()&&a.id===c.cycleAuditId&&open.length?`<button class="link small" data-a="editCrit" data-id="${a.id}">Edit criteria</button>`:''}</div>
       ${a.checklist?`<div class="ck" id="ck-${a.id}">${critChips(a)}</div>`:''}${auditInfo(a,runs[i+1])}${editTrail(a)}</div>`).join('')}</div>
@@ -484,7 +485,7 @@ function records(t){
 function auditForm(c){
   const d=draft;
   return `<form class="audit" id="auditForm" novalidate>
-  <div class="audit-h"><h3>Audit #${S.audits.filter(a=>a.courseId===c.id).length+1}</h3><div class="audit-h-act"><label class="lp-tick"><input type="checkbox" id="fLpOn"${draft.lpOn?' checked':''}> Part of learning plan</label><input type="text" id="fLp" class="lp-code" placeholder="Course codes, separated by commas" aria-label="Learning plan course codes, separated by commas" autocomplete="off" value="${esc(draft.lp)}"${draft.lpOn?'':' hidden'}><button type="button" class="btn sm" data-a="cancelAudit" data-id="${c.id}">Cancel audit</button></div></div>
+  <div class="audit-h"><h3>Audit #${fullAudits(c).length+1}</h3><div class="audit-h-act"><label class="lp-tick"><input type="checkbox" id="fLpOn"${draft.lpOn?' checked':''}> Part of learning plan</label><input type="text" id="fLp" class="lp-code" placeholder="Course codes, separated by commas" aria-label="Learning plan course codes, separated by commas" autocomplete="off" value="${esc(draft.lp)}"${draft.lpOn?'':' hidden'}><button type="button" class="btn sm" data-a="cancelAudit" data-id="${c.id}">Cancel audit</button></div></div>
   <div class="audit-b">
     <div class="info-fields">
       <label class="field"><span>Docebo pricing</span><input type="text" id="fPrice" inputmode="decimal" autocomplete="off" value="${esc(d.price)}"></label>
@@ -542,13 +543,13 @@ function submitAudit(){
     const a=addAudit(c,'Failed',draft.crit.map(v=>v||'Yes'),info,draft.issues.map(x=>({...x})));
     const made=draft.issues.map(x=>{const t={id:'TKT-'+S.seq.t++,courseId:c.id,auditId:a.id,category:x.cat,detail:x.desc.trim(),status:'New',createdAt:ts,createdBy:user.name,
       escalatedAt:null,escalatedBy:null,fixDate:null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};S.tickets.push(t);return t});
-    c.health='Unhealthy';c.auditorStatus='In Progress';c.cycleAuditId=a.id;c.lastAudited=ts;c.lastAuditor=user.name;
+    c.health='Unhealthy';c.auditorStatus='In Progress';c.cycleAuditId=a.id;c.lastAudited=ts;c.lastAuditor=user.name;c.auditCount=fullAudits(c).length;
     log({courseId:c.id,ticketIds:made.map(t=>t.id),action:'Audit failed',detail:`${made.length} ticket(s) created: ${made.map(t=>`${t.id} ${t.category}`).join(', ')}${started}`});
     var msg=`Unhealthy · created ${made.map(t=>t.id).join(', ')}`, fill='--bad', label=`${made.length} ticket${made.length>1?'s':''} created`;
   }else{
     c.price=price;c.audience=audience;c.learningPlan=learningPlan;
     addAudit(c,'Passed',[...draft.crit],info);
-    c.health='Healthy';c.auditorStatus='Completed';c.auditCount++;c.lastAudited=ts;c.lastAuditor=user.name;
+    c.health='Healthy';c.auditorStatus='Completed';c.auditCount=fullAudits(c).length;c.lastAudited=ts;c.lastAuditor=user.name;
     log({courseId:c.id,action:'Audit passed',detail:`Iteration ${c.auditCount}${started}`});
     var msg=`Healthy · audit counter now ${c.auditCount}`, fill='--ok', label='Passed ✓';
   }
@@ -639,7 +640,7 @@ function vDash(){
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end"><label class="field"><span>From</span><input type="date" id="rFrom" value="${toInput(from)}"></label>
     <label class="field"><span>To</span><input type="date" id="rTo" value="${toInput(to)}"></label>
     <button class="btn sm" data-a="rToday">Today</button><button class="btn sm" data-a="rWeek">7 days</button></div></div>
-    <div class="kv"><div><b>${cnt('Audit passed')+cnt('Re-verification approved')}</b><span>Audits passed</span></div><div><b>${cnt('Audit failed')}</b><span>Audits failed</span></div>
+    <div class="kv"><div><b>${cnt('Audit passed')}</b><span>Audits passed</span></div><div><b>${cnt('Audit failed')}</b><span>Audits failed</span></div>
     <div><b>${inR.reduce((n,l)=>n+(l.ticketIds?.length||0),0)+cnt('Added after audit')}</b><span>Tickets opened</span></div><div><b>${cnt('Escalated')}</b><span>Escalated</span></div>
     <div><b>${cnt('Ticket closed')}</b><span>Tickets closed</span></div><div><b>${inR.filter(l=>l.action==='Ticket closed'&&/self-approved/.test(l.detail)).length}</b><span>Self-approved</span></div><div><b>${cnt('Retest failed')+cnt('Cancellation rejected')+cnt('Discontinuation rejected')}</b><span>Sent back</span></div></div></div>`;
 }
@@ -653,7 +654,7 @@ const inPeriod=t=>{if(teamP==='all')return true;const n=new Date();return t>=new
 function auditorStats(name){
   const all=S.audits.filter(a=>a.auditor===name), runs=all.filter(a=>a.note!==REVERIFY&&inPeriod(a.date));
   return {audits:runs.length,courses:new Set(runs.map(a=>a.courseId)).size,issues:S.tickets.filter(t=>t.createdBy===name&&inPeriod(t.createdAt)).length,
-    verified:S.logs.filter(l=>l.actor===name&&l.action==='Ticket closed'&&ticket(l.ticketId)?.closedAs==='Resolved'&&!ticket(l.ticketId)?.selfApproved&&inPeriod(l.ts)).length,last:all.length?Math.max(...all.map(a=>a.date)):null};
+    verified:S.logs.filter(l=>l.actor===name&&l.action==='Ticket closed'&&ticket(l.ticketId)?.closedAs==='Resolved'&&!ticket(l.ticketId)?.selfApproved&&inPeriod(l.ts)).length,last:Math.max(0,...all.filter(a=>a.note!==REVERIFY).map(a=>a.date))||null};
 }
 const periodChips=()=>`<div class="chips-bar">${[['month','This month'],['all','All time']].map(([k,l])=>`<button class="fchip" data-a="teamP" data-id="${k}" aria-pressed="${teamP===k}">${l}</button>`).join('')}</div>`;
 const avatar=(u,cls)=>`<span class="avatar${cls?' '+cls:''}" aria-hidden="true">${esc(u.name[0])}</span>`;
@@ -671,7 +672,7 @@ function vTeam(){
 }
 function vAuditor(){
   const u=USERS.find(x=>x.id===view.id&&x.role==='Auditor')||USERS[0], s=auditorStats(u.name);
-  const all=S.audits.filter(a=>a.auditor===u.name).sort((a,b)=>b.date-a.date);
+  const all=S.audits.filter(a=>a.auditor===u.name).sort((a,b)=>b.date-a.date),listed=all.filter(a=>a.note!==REVERIFY);
   // audits per month over the last six months, oldest first
   const n=new Date(), per=[...Array(6)].map((_,i)=>{const m=new Date(n.getFullYear(),n.getMonth()-5+i,1),end=new Date(m.getFullYear(),m.getMonth()+1,1).getTime();
     return [`${MONTHS[m.getMonth()]} ${m.getFullYear()}`,all.filter(a=>a.note!==REVERIFY&&a.date>=m.getTime()&&a.date<end).length]});
@@ -680,9 +681,9 @@ function vAuditor(){
   <div class="panel"><div class="tm-top">${avatar(u,'lg')}<div><h2>${esc(u.name)}${u.id===user.id?'<span class="you">You</span>':''}</h2><span class="muted small">${u.role} · last audit ${fmtD(s.last)}</span></div>${periodChips()}</div>
     <div class="kv">${k(s.audits,'Audits')}${k(s.courses,'Courses audited')}${k(s.issues,'Issues raised')}${k(s.verified,'Fixes verified')}</div></div>
   <div class="panel"><h3>Audits per month</h3><div class="bars">${per.map(([l,v])=>`<div class="bar"><span class="mono">${l}</span><div class="track"><div class="fill" style="width:${v/max*100}%"></div></div><span class="v">${v}</span></div>`).join('')}</div></div>
-  <div class="panel"><h3>All audits (${all.length})</h3>${all.length?`<div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Course</th><th>Result</th><th>Issues</th></tr></thead><tbody>
-    ${all.map(a=>{const c=course(a.courseId);return `<tr><td class="mono nowrap">${fmtD(a.date)}</td><td>${c?`<button class="link mono" data-a="open" data-id="${c.id}">${esc(c.code)}</button> <span class="muted small">${esc(c.name)}</span>`:'<span class="muted">Deleted course</span>'}</td>
-      <td class="nowrap">${pill(a.result)}${a.note===REVERIFY?' <span class="muted small">Fixes verified</span>':''}</td><td class="mono">${a.issues?.length||'—'}</td></tr>`}).join('')}</tbody></table></div>`
+  <div class="panel"><h3>All audits (${listed.length})</h3>${listed.length?`<div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Course</th><th>Result</th><th>Issues</th></tr></thead><tbody>
+    ${listed.map(a=>{const c=course(a.courseId);return `<tr><td class="mono nowrap">${fmtD(a.date)}</td><td>${c?`<button class="link mono" data-a="open" data-id="${c.id}">${esc(c.code)}</button> <span class="muted small">${esc(c.name)}</span>`:'<span class="muted">Deleted course</span>'}</td>
+      <td class="nowrap">${pill(a.result)}</td><td class="mono">${a.issues?.length||'—'}</td></tr>`}).join('')}</tbody></table></div>`
     :'<span class="muted">No audits yet.</span>'}</div>`;
 }
 
@@ -721,13 +722,12 @@ function closeCycle(c){
   const dropped=cyc.filter(t=>t.closedAs==='Cancelled').length;
   if(dropped){log({courseId:c.id,action:'Closed with cancelled tickets',detail:`Course Healthy · ${dropped} ticket(s) cancelled, answers kept`});
     return `Course is Healthy · ${dropped} ticket${dropped>1?'s':''} cancelled, answers kept`}
-  c.auditCount++;
-  // Last audited stays on the last full audit: this only confirms the fixes, it doesn't check all 8 criteria again
+  // Last audited and the audit count stay on full audits: this only confirms the fixes, it doesn't check all 8 criteria again
   // every issue is fixed, so the failed criteria become Yes; N/A answers stay N/A
   const prev=S.audits.find(a=>a.id===c.cycleAuditId)?.checklist;
   addAudit(c,'Passed',prev?prev.map(v=>v==='N/A'?'N/A':'Yes'):null,{price:c.price,audience:c.audience},[],'Re-verification after fixes');
-  log({courseId:c.id,action:'Re-verification approved',detail:`Course Healthy · iteration ${c.auditCount}`});
-  return `Course is Healthy · audit counter ${c.auditCount}`;
+  log({courseId:c.id,action:'Re-verification approved',detail:'Course Healthy'});
+  return 'Course is Healthy';
 }
 function log(e){S.logs.push({id:'L'+S.seq.l++,ts:Date.now(),actor:user.name,detail:'',...e})}
 function addAudit(c,result,checklist,info,issues,note){
@@ -1376,7 +1376,7 @@ S.tickets.forEach(t=>{if(!t.createdBy)t.createdBy=S.logs.find(l=>l.ticketId===t.
 // fix date moves no longer wait for approval; drop any request saved by the earlier version
 S.tickets.forEach(t=>{delete t.fixReq});
 // last audited is the latest full audit of any result; approving fixes doesn't count, which also corrects older data
-S.courses.forEach(c=>{const a=S.audits.filter(x=>x.courseId===c.id&&x.note!==REVERIFY).sort((x,y)=>y.date-x.date)[0];
+S.courses.forEach(c=>{const full=fullAudits(c),a=[...full].sort((x,y)=>y.date-x.date)[0];c.auditCount=full.length;
   if(a){c.lastAudited=a.date;c.lastAuditor=a.auditor}});
 // an unfinished audit form does not survive a reload, so release its lock
 S.courses.forEach(c=>{if(c.lockedBy){c.lockedBy=null;c.lockedAt=null;if(!openOf(c.id).length&&c.auditorStatus==='In Progress')c.auditorStatus='Pending'}});

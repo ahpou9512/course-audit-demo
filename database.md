@@ -295,6 +295,7 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 - 第一次填 `FixDate` 不用写 note，同时存进 `FirstFixDate`（之后不再改）。填了之后不能清空，只能改成新日期。
 - 改 `FixDate` 一定要写 note，原因存进 `TICKET_NOTES`，`ACTIVITY_LOGS` 记 `Fix date changed`；改了几次就数这个 Action 的行数。
 - 改 `FixDate` 不限次数，也不用批准；次数和原因都显示出来，让大家知道。
+- Audit 数字：课程页、Status report 和 Team 页都只算 `IsReverification = false` 的 audit，所以数字一致。Re-verification 还是留在 Audit history，但不编号。修好的数量看 `Ticket closed`。
 - 这一轮只要有 ticket 是 `ClosedAs = Cancelled`，全部关闭后课程还是变 `Healthy`，但不建 re-verification audit，答案保持原样，`ACTIVITY_LOGS` 记 `Closed with cancelled tickets`，画面显示取消的数量，直到下一次完整 audit。
 - 长度和金额上限：Course Code 和 Learning Plan Code 最多 50 个字符，Course Name 最多 200 个字符，Docebo Price 是 0 到 99,999,999.99。Add course、编辑课程、audit 和导入都一样。导入的 Audience 重复写只算一个。
 - Last audited 和 180 天：都用最新一次 `IsReverification = false` 的 `AUDITS.AuditedAt` 算，不用存。超过 180 天（第 180 天当天不算）可以用 `Over 180 days ago` 筛选；只有 `Healthy` 的课程会变琥珀色。这个不改变课程状态，也不开 ticket，要 Auditor 自己筛选后做 re-audit。
