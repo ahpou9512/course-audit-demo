@@ -102,6 +102,7 @@ Table Audits {
 
   indexes {
     (AuditorId, AuditedAt) // Team page: audits per auditor, per month
+    (CourseId, IsReverification, AuditedAt) // Last audited and the 180-day filter
   }
 }
 
@@ -126,14 +127,14 @@ Table Tickets {
   CreatedAt datetime [not null]
   SlaStartAt datetime [note: 'imported tickets: the import day; null = count from CreatedAt']
   CreatedById int [not null, ref: > Users.Id, note: 'auditor who opened it (at the audit or added later)']
-  EscalatedById int [ref: > Users.Id, note: 'the SELM who owns the ticket']
+  EscalatedById int [ref: > Users.Id, note: 'the SELM or Auditor who owns the ticket']
   EscalatedAt datetime
   FixDate date
   FirstFixDate date [note: 'the first date set, never changes; moves are counted from ActivityLogs']
   Justification varchar [note: 'reason to cancel']
   Rejection varchar [note: 'why the auditor sent it back']
   ClosedAt datetime
-  ClosedById int [ref: > Users.Id, note: 'auditor who approved']
+  ClosedById int [ref: > Users.Id, note: 'auditor who approved; the same as EscalatedById means self-approved']
   ClosedAs ClosedAs
 
   indexes {

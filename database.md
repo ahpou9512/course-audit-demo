@@ -119,8 +119,8 @@ erDiagram
     int ImportBatchId FK
   }
   COURSE_LEARNING_PLANS {
-    int CourseId FK
-    string LearningPlanCode
+    int CourseId PK
+    string LearningPlanCode PK
   }
   IMPORT_BATCHES {
     int Id PK
@@ -190,7 +190,7 @@ erDiagram
 | AUDITS | 每一次 audit | `S.audits` |
 | AUDIT_ANSWERS | 每次 audit 的每条 criteria 答案：Yes / No / N/A | `audit.checklist` 数组 |
 | TICKETS | 每个 issue 一张 ticket | `S.tickets` |
-| TICKET_NOTES | SELM 在 ticket 上留的 note | `ticket.notes` 数组 |
+| TICKET_NOTES | 处理 ticket 的人（SELM 或 Auditor）留的 note | `ticket.notes` 数组 |
 | ACTIVITY_LOGS | 所有修改记录（谁、什么时候、做了什么） | `S.logs` |
 | COURSE_LEARNING_PLANS | 课程属于哪些 learning plan，可以多个，也可以一个都没有 | `course.learningPlan` 字符串 |
 | IMPORT_BATCHES | 每一次导入：文件名、类型、数量、谁导入、有没有撤销 | `S.imports` |
@@ -201,7 +201,7 @@ erDiagram
 2. **多选和列表拆成另一张表。** audience 和 8 个答案在 demo 里是字符串或数组；在数据库里拆开，才能做统计，例如"哪条 criteria 最常是 No"。
 3. **算得出来的不存。** demo 的 `auditCount`、`lastAudited`、`lastAuditor` 可以从 `AUDITS` 算出来，存了反而可能对不上。
 4. **Criteria 是数据，不是代码。** 以后要加第 9 条，或改哪几条可以 N/A，只要改 `CRITERIA` 表。
-5. **Ticket 的拥有者是 `EscalatedById`。** 只有拥有者可以更新这张 ticket，服务器端要检查这一点；拥有者请假时，别的 SELM 用 take over 接手，变成新的拥有者。
+5. **Ticket 的拥有者是 `EscalatedById`。** 只有拥有者可以更新这张 ticket，服务器端要检查这一点；拥有者请假时，其他 SELM 或 Auditor 用 take over 接手，变成新的拥有者。
 6. **Pricing 用 `decimal(10,2)`，不用文字。** 文字可以输入任何东西（例如 `fdafasd`），也不能计算、比较或正确排序；金额也不要用 `float`，会有小数误差。空的（null）代表还没填。
 7. **Audit 记下当时的 pricing 和 audience**（`PriceSnapshot`、`AudienceSnapshot`），这样课程之后被修改，旧的 audit 还看得到当时的值。
 8. **AUDITS 只在提交时才写入。** 打开 audit 表单只是锁定课程（`LockedById`、`LockedAt`），中途放弃的话不会留下任何 audit 记录，课程状态也不变。
@@ -280,21 +280,22 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 - Ticket 的 SLA 有两段，都是 7 天：`Status = New` 且 `SlaStartAt`（空的话用 `CreatedAt`）超过 7 天（还没 escalate）；`Status` 是 `Escalated` 或 `Retest Failed`、`FixDate` 是空的、而且 `EscalatedAt` 超过 7 天（还没填 fix date）。这两种在 Dashboard 分开计数、分开提醒。
 - 一门课同一时间只能有一个人 audit（`LockedById`）；中途离开或取消就放弃这次 audit、解除锁定，不留记录；锁太久没提交（例如超过一天）也要自动解除。
 - 这一轮还有 open ticket 时，Auditor 可以补开 ticket：`AuditId` 是这一轮的 audit，`CreatedById` 是补开的人，`ACTIVITY_LOGS` 记 `Added after audit`。
-- Ticket 还是 `New`（SELM 还没 escalate）时，Auditor 可以改 Category 和 Detail（记 `Edited by auditor`），或直接删除；删除会在 `ACTIVITY_LOGS` 留一笔 `Ticket removed`，`AuditId` 指向那一轮。这一轮最后一张 open ticket 不能删。
+- Ticket 还是 `New`（还没有人 escalate）时，Auditor 可以改 Category 和 Detail（记 `Edited by auditor`），或直接删除；删除会在 `ACTIVITY_LOGS` 留一笔 `Ticket removed`，`AuditId` 指向那一轮。这一轮最后一张 open ticket 不能删。
 - 所有动作都要在服务器端、用**当下**的状态再检查一次（例如 `DELETE ... WHERE Status = 'New'`，或 EF Core 的 `RowVersion`），避免画面是旧的、别人刚好已经改了状态。
 - 只有 Auditor 可以 re-audit，按下后直接打开 8 项 criteria；Course Owner 不能排入 re-audit。
 - Re-audit 时课程保持 `Healthy`，直到提交结果；答案全部没变也可以提交，先确认一次，会留下一笔 Passed 记录并更新 Last audited；这是半年复查最常见的结果。不想留记录就用 Cancel audit。有 `No` 提交后变成 `Unhealthy`，只改成 N/A 的话保持 `Healthy`。
 - SELM 和 Auditor 都可以 escalate ticket。只有 escalate 的人（`EscalatedById`）可以更新、Resolve 或 Cancel 那张 ticket；只有 Auditor 可以 Approve 或 Reject。
 - Auditor 可以批准自己处理的 ticket。`ClosedById = EscalatedById` 就是 Self-approved，页面上有标记，Status report 分开计数，也不算进 Team 页的 Fixes verified。不用新字段。
 - Pricing 和 Audience 每次修改都要在 `ACTIVITY_LOGS` 记一笔（`Pricing updated` / `Audience updated`，`Detail` 写 `旧值 → 新值`），`AuditId` 指向这一轮的 audit，画面上显示在那一轮 audit 的修改记录里。
-- 按错 escalate 可以 undo：只限同一个 SELM，而且还是 `Escalated`、`FixDate` 是空的；填了 `FixDate` 就不能 undo。次数不限。Undo 后 `Status` 回到 `New`，`EscalatedById` 清空，`EscalatedAt` **保留**；之后再 escalate 继续用原本的 `EscalatedAt`，所以 SLA 不会重新算。
-- SELM 请假（AL / MC）时，别的 SELM 可以 take over 还在处理中（`Escalated`、`In Progress`、`Retest Failed`）的 ticket：`EscalatedById` 换成接手的人，`EscalatedAt` 和 `FixDate` 不变（SLA 照算），`ACTIVITY_LOGS` 记 `Taken over`，`Detail` 写原本的人。
+- 按错 escalate 可以 undo：只限 escalate 的同一个人，而且还是 `Escalated`、`FixDate` 是空的；填了 `FixDate` 就不能 undo。次数不限。Undo 后 `Status` 回到 `New`，`EscalatedById` 清空，`EscalatedAt` **保留**；之后再 escalate 继续用原本的 `EscalatedAt`，所以 SLA 不会重新算。
+- 拥有者请假（AL / MC）时，其他 SELM 或 Auditor 可以 take over 还在处理中（`Escalated`、`In Progress`、`Retest Failed`）的 ticket：`EscalatedById` 换成接手的人，`EscalatedAt` 和 `FixDate` 不变（SLA 照算），`ACTIVITY_LOGS` 记 `Taken over`，`Detail` 写原本的人。
 - 拥有者送出 Resolved 或 Cancel 后，在 Auditor 审核前可以 take back：`Status` 回到 `In Progress`（没有 `FixDate` 就回到 `Escalated`），`Justification` 清空，`ACTIVITY_LOGS` 记 `Taken back`。
 - 新的 `FixDate` 不能早于今天。送出 Resolved 前一定要有 `FixDate`；Cancel 不用。
 - Ticket 填了 `FixDate` 就从 `Escalated` 变成 `In Progress`。
 - 第一次填 `FixDate` 不用写 note，同时存进 `FirstFixDate`（之后不再改）。填了之后不能清空，只能改成新日期。
 - 改 `FixDate` 一定要写 note，原因存进 `TICKET_NOTES`，`ACTIVITY_LOGS` 记 `Fix date changed`；改了几次就数这个 Action 的行数。
 - 改 `FixDate` 不限次数，也不用批准；次数和原因都显示出来，让大家知道。
+- Last audited 和 180 天：都用最新一次 `IsReverification = false` 的 `AUDITS.AuditedAt` 算，不用存。超过 180 天（第 180 天当天不算）可以用 `Over 180 days ago` 筛选；只有 `Healthy` 的课程会变琥珀色。这个不改变课程状态，也不开 ticket，要 Auditor 自己筛选后做 re-audit。
 - Dashboard 有 Needs attention 表，把超时的项目放在一起，最久的排最前面：等 audit 超过 30 天、没 escalate 超过 7 天、没 fix date 超过 7 天、ETA missed。每行显示课程、ticket、负责人和超时天数，可以按类型筛选。都用查询算，不用新字段。
 - Dashboard 有 Fix date changes 表：列出还没关、改过 `FixDate` 的 ticket，显示次数、`FirstFixDate`、现在的 `FixDate` 和最近一次的原因（最近一次 `Fix date changed` 之后的那笔 `Note added`）。都用查询算，不用新字段。
 - ETA missed：`Status` 是 `In Progress` 或 `Retest Failed`，而且今天已经过了 `FixDate`。不用存，查询时算，Dashboard 和 ticket 上都要显示。
@@ -304,3 +305,11 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 - Restore 课程：只有 Auditor；课程直接变回 `Pending Audit`、`AuditStatus = Pending`，等新的 audit。如果有还在使用的课程 `Code` 相同，或 `Name` 相同（不分大小写、忽略多余空格），先提示 Auditor，确认后才可以强制 restore，并在 `ACTIVITY_LOGS` 的 `Detail` 写明相同的课程。
 - Delete 课程：只有在这门课**没有任何 audit 和 ticket** 时才允许。
 - Pricing 和 Audience：在 audit 表单里填；之后只有课程是 `Unhealthy`（ticket 处理中）时，Auditor 或 SELM 才能在课程页直接改，`Pending Audit`、`Healthy`、`Discontinued` 和 audit 进行中都不能改（re-audit 也不能改；Healthy 的课程要先 re-audit 标出 No、变成 Unhealthy 后才能改）；每次修改都写进 `ACTIVITY_LOGS`。
+
+## 只有 demo 才有的部分
+
+这些不用放进数据库：
+
+- **登录：** demo 只选账号，没有密码。真网站要先确认是不是用公司的 SSO；用 SSO 的话 `USERS` 不用存密码，不用的话要加 ASP.NET Core Identity 的表。
+- **Clear all data 和 Add samples：** 只给 demo 用，真网站不要有这两个功能。
+- **分页同步：** demo 的资料存在浏览器，靠 `storage` 事件同步分页。真网站由服务器保存，`LockedById` 要在服务器端检查，才能避免两个人同时 audit 同一门课。
