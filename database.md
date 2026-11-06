@@ -39,6 +39,7 @@ erDiagram
     string Name
     string Type
     decimal DoceboPrice
+    string LearningPlanCode
     string Health
     string AuditStatus
     int CurrentAuditId FK
@@ -70,6 +71,7 @@ erDiagram
     bool IsReverification
     decimal PriceSnapshot
     string AudienceSnapshot
+    string LearningPlanSnapshot
     string Note
   }
   AUDIT_ANSWERS {
@@ -208,7 +210,7 @@ erDiagram
     | Audits | `AUDITS` 里 `AuditorId` 是他、`IsReverification = false` 的行数 |
     | Courses audited | 同上，`CourseId` 不重复的数量 |
     | Issues raised | `TICKETS` 里 `CreatedById` 是他的数量（包括之后补开的） |
-    | Fixes verified | `TICKETS` 里 `ClosedById` 是他、`ClosedAs = Resolved` 的行数；批准 Cancel 和课程下架都不算；"This month" 用 `ClosedAt` 算 |
+    | Fixes verified | `TICKETS` 里 `ClosedById` 是他、`ClosedAs = Resolved` 的行数；批准 Cancel、课程下架和 Self-approved 都不算；"This month" 用 `ClosedAt` 算 |
     | Audits per month | `AUDITS` 按 `AuditedAt` 的年月分组计数 |
 
     "This month" 只是多加一个条件：`AuditedAt >= 这个月 1 号`。EF Core 写起来大概是：
@@ -257,13 +259,14 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 | 课程 | `Course registered`、`Course discontinued`、`Course restored`、`Pricing updated`、`Audience updated`、`Course info updated` |
 | Audit | `Audit passed`、`Audit failed`、`Criteria updated`、`Re-verification approved` |
 | Ticket（Auditor） | `Ticket created`、`Added after audit`、`Edited by auditor`、`Ticket removed`、`Ticket closed`、`Retest failed`、`Cancellation rejected` |
-| Ticket（SELM） | `Escalated`、`Escalation undone`、`Fix date set`、`Fix date changed`、`Status → In Progress`、`Note added`、`Marked resolved`、`Proposed cancellation`、`Taken back`、`Taken over` |
+| Ticket（SELM 或 Auditor） | `Escalated`、`Escalation undone`、`Fix date set`、`Fix date changed`、`Status → In Progress`、`Note added`、`Marked resolved`、`Proposed cancellation`、`Taken back`、`Taken over` |
 
 ## 规则（服务器端要检查）
 
 - `AUDIT_ANSWERS.Answer` 只能是 `Yes`、`No`、`N/A`；`N/A` 只在 `CRITERIA.AllowNA = true` 时允许。
 - 有任何 `No` 就一定要开至少一张 ticket。
 - 有 `No` 时，Auditor 没选的 criteria 一律存成 `Yes`，所以每次 audit 在 `AUDIT_ANSWERS` 永远是完整的 8 行；一个 `No` 都没有（全部通过）时，8 条都要明确选过才能提交。
+- Part of learning plan 是选填：audit 表单勾选后一定要填 Course Code，不能是这门课自己的 Code。提交成功才写入 `COURSES.LearningPlanCode`，并存进 `AUDITS.LearningPlanSnapshot`。这个 Code 不用已经在系统里，因为 learning plan 不一定已经加入 masterlist。没有勾选就存成空的；re-audit 只改这一项也可以提交。
 - Catalog audience 是选填：audit 表单和课程页都可以一个都不选，`COURSE_AUDIENCES` 就没有这门课的行，`AudienceSnapshot` 是空的。
 - Audit 提交成功才写入课程的 `DoceboPrice` 和 `COURSE_AUDIENCES`；验证失败或取消都不改课程。
 - 还有 ticket 没关时，这次 audit 至少要留一个 `No`。
@@ -276,16 +279,18 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 - 所有动作都要在服务器端、用**当下**的状态再检查一次（例如 `DELETE ... WHERE Status = 'New'`，或 EF Core 的 `RowVersion`），避免画面是旧的、别人刚好已经改了状态。
 - 只有 Auditor 可以 re-audit，按下后直接打开 8 项 criteria；Course Owner 不能排入 re-audit。
 - Re-audit 时课程保持 `Healthy`，直到提交结果；re-audit 要有 `No`，或有答案改变（例如 Yes → N/A）才能提交；完全没变就取消，不留记录。有 `No` 提交后变成 `Unhealthy`，只改成 N/A 的话保持 `Healthy`。
-- 只有 escalate 的 SELM（`EscalatedById`）可以更新、Resolve 或 Cancel 那张 ticket；只有 Auditor 可以 Approve 或 Reject。
+- SELM 和 Auditor 都可以 escalate ticket。只有 escalate 的人（`EscalatedById`）可以更新、Resolve 或 Cancel 那张 ticket；只有 Auditor 可以 Approve 或 Reject。
+- Auditor 可以批准自己处理的 ticket。`ClosedById = EscalatedById` 就是 Self-approved，页面上有标记，Status report 分开计数，也不算进 Team 页的 Fixes verified。不用新字段。
 - Pricing 和 Audience 每次修改都要在 `ACTIVITY_LOGS` 记一笔（`Pricing updated` / `Audience updated`，`Detail` 写 `旧值 → 新值`），`AuditId` 指向这一轮的 audit，画面上显示在那一轮 audit 的修改记录里。
 - 按错 escalate 可以 undo：只限同一个 SELM，而且还是 `Escalated`、`FixDate` 是空的；填了 `FixDate` 就不能 undo。次数不限。Undo 后 `Status` 回到 `New`，`EscalatedById` 清空，`EscalatedAt` **保留**；之后再 escalate 继续用原本的 `EscalatedAt`，所以 SLA 不会重新算。
 - SELM 请假（AL / MC）时，别的 SELM 可以 take over 还在处理中（`Escalated`、`In Progress`、`Retest Failed`）的 ticket：`EscalatedById` 换成接手的人，`EscalatedAt` 和 `FixDate` 不变（SLA 照算），`ACTIVITY_LOGS` 记 `Taken over`，`Detail` 写原本的人。
-- SELM 送出 Resolved 或 Cancel 后，在 Auditor 审核前可以 take back：`Status` 回到 `In Progress`（没有 `FixDate` 就回到 `Escalated`），`Justification` 清空，`ACTIVITY_LOGS` 记 `Taken back`。
+- 拥有者送出 Resolved 或 Cancel 后，在 Auditor 审核前可以 take back：`Status` 回到 `In Progress`（没有 `FixDate` 就回到 `Escalated`），`Justification` 清空，`ACTIVITY_LOGS` 记 `Taken back`。
 - 新的 `FixDate` 不能早于今天。送出 Resolved 前一定要有 `FixDate`；Cancel 不用。
 - Ticket 填了 `FixDate` 就从 `Escalated` 变成 `In Progress`。
 - 第一次填 `FixDate` 不用写 note，同时存进 `FirstFixDate`（之后不再改）。填了之后不能清空，只能改成新日期。
 - 改 `FixDate` 一定要写 note，原因存进 `TICKET_NOTES`，`ACTIVITY_LOGS` 记 `Fix date changed`；改了几次就数这个 Action 的行数。
 - 改 `FixDate` 不限次数，也不用批准；次数和原因都显示出来，让大家知道。
+- Dashboard 有 Needs attention 表，把超时的项目放在一起，最久的排最前面：等 audit 超过 7 天、没 escalate、没 fix date、ETA missed。每行显示课程、ticket、负责人和超时天数，可以按类型筛选。都用查询算，不用新字段。
 - Dashboard 有 Fix date changes 表：列出还没关、改过 `FixDate` 的 ticket，显示次数、`FirstFixDate`、现在的 `FixDate` 和最近一次的原因（最近一次 `Fix date changed` 之后的那笔 `Note added`）。都用查询算，不用新字段。
 - ETA missed：`Status` 是 `In Progress` 或 `Retest Failed`，而且今天已经过了 `FixDate`。不用存，查询时算，Dashboard 和 ticket 上都要显示。
 - Cancel ticket 一定要写原因（存在 `Justification`），Auditor 确认后 `ClosedAs = Cancelled`，课程不会下架。

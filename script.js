@@ -53,7 +53,8 @@ const tkFlag=t=>isOverdue(t)?slaLate(t):etaMissed(t)?`ETA missed ${etaMissed(t)}
 const slaLate=t=>`${daysSince(slaFrom(t))}d ${t.status==='New'?'not escalated':'no fix date'}`;
 function slaLeft(t){const s=slaFrom(t);if(!s||isOverdue(t))return '';const d=7-daysSince(s),what=t.status==='New'?'to escalate':'to set a fix date';return d>0?`${d}d left ${what}`:`last day ${what}`}
 const isAud=()=>user.role==='Auditor', isSelm=()=>user.role==='SELM', isOwner=()=>user.role==='Course Owner';
-// a ticket belongs to the SELM who escalated it; other SELMs can only view it
+// SELMs and auditors can both work on tickets; a ticket belongs to whoever escalated it, and others can only view it or take it over
+const canWork=()=>isSelm()||isAud();
 const mine=t=>!t.escalatedBy||t.escalatedBy===user.name;
 // active courses that look like the same one: same code, or the same name ignoring case and extra spaces
 const INVISIBLE=/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u00AD\u200B-\u200F\u2060-\u2064\uFEFF]/g;
@@ -80,7 +81,7 @@ function nextStep(c){
   if(st==='issues'){const n=o.filter(t=>t.status==='New'||WORKING.includes(t.status)).length, v=o.length-n;
     if(isAud()&&v)return [`${v} ticket${v>1?'s':''} to verify`,true];
     const m=o.filter(t=>t.status==='New'||WORKING.includes(t.status)&&mine(t)).length;
-    return isSelm()&&m?[`${m} ticket${m>1?'s':''} to handle`,true]:['With SELM',false]}
+    return canWork()&&m?[`${m} ticket${m>1?'s':''} to handle`,true]:['In progress',false]}
   if(st==='verify')return isAud()?['Verify fixes',true]:['Waiting for auditor',false];
   if(st==='healthy')return [`Audited ${daysSince(c.lastAudited)}d ago`,false];
   return ['Archived',false];
@@ -167,7 +168,7 @@ function vCourses(){
   const canAdd=isAud()||isOwner(), myN=S.tickets.filter(t=>t.status!==CLOSED&&t.escalatedBy===user.name).length;
   return `<div class="head"><h2>Courses</h2>${canAdd?`<div class="imp-dl"><button class="btn" data-a="importOpen">Import</button><button class="btn primary" data-a="addCourse">+ Add course</button></div>`:''}</div>
   ${impBanner()}<div class="toolbar"><div class="chips-bar">${STAGES.map(([k,l])=>`<button class="fchip${k==='disc'?' sep':''}" data-a="filter" data-id="${k}" aria-pressed="${filter===k}">${l} <b>${counts[k]}</b></button>`).join('')}
-    ${isSelm()?`<button class="fchip mine" data-a="toggleMine" aria-pressed="${myF}">My tickets <b>${myN}</b></button>`:''}</div>
+    ${canWork()?`<button class="fchip mine" data-a="toggleMine" aria-pressed="${myF}">My tickets <b>${myN}</b></button>`:''}</div>
     </div>
   <div class="tk-legend" role="group" aria-label="Highlight tickets"><span class="lbl">Highlight tickets</span>${TK_OPTS.map(([v,l])=>`<button class="lchip" data-a="tkHl" data-id="${v}" aria-pressed="${tkF===v}">${v==='closed'?'<span class="dot chk">✓</span>':`<span class="dot ${tone(v==='verify'?PV_RES:v)}"></span>`}${l} <b>${tkCount(v)}</b></button>`).join('')}</div>
   <div class="tbl-wrap"><table class="courses-tbl"><colgroup><col style="width:22%"><col style="width:20%"><col style="width:30%"><col style="width:13%"><col style="width:15%"></colgroup>
@@ -185,7 +186,7 @@ const tkIs=(t,v)=>v==='open'?t.status!==CLOSED:v==='verify'?t.status===PV_RES||t
 const tkMatch=t=>tkIs(t,tkF);
 const tkCount=v=>S.courses.flatMap(shownOf).filter(t=>tkIs(t,v)).length; // tickets the table shows in that state
 // category and My tickets narrow the course list; the ticket status filter only highlights, so no course is hidden by it
-const tkKeep=t=>(!catFilter||t.category===catFilter)&&(!myF||!isSelm()||t.escalatedBy===user.name);
+const tkKeep=t=>(!catFilter||t.category===catFilter)&&(!myF||!canWork()||t.escalatedBy===user.name);
 const tkHit=t=>tkKeep(t)&&(!tkF||tkMatch(t));
 // while the cycle is still open, tickets already approved stay listed with a check mark
 const shownOf=c=>openOf(c.id).length?ticketsOf(c.id).filter(t=>t.status!==CLOSED||t.auditId===c.cycleAuditId):[];
@@ -240,12 +241,12 @@ function pagerHtml(){
 function courseRows(){
   const q=search.trim().toLowerCase();
   const list=S.courses.filter(c=>(filter==='all'?stage(c)!=='disc':stage(c)===filter)&&(!q||(c.code+' '+c.name).toLowerCase().includes(q))
-      &&auditedOk(c)&&(!(catFilter||myF&&isSelm())||shownOf(c).some(tkKeep)))
+      &&auditedOk(c)&&(!(catFilter||myF&&canWork())||shownOf(c).some(tkKeep)))
     .sort((a,b)=>(tkF?shownOf(b).some(tkHit)-shownOf(a).some(tkHit):0)||(nextStep(b)[1]-nextStep(a)[1])||b.createdAt-a.createdAt);
   // one page of PAGE rows at a time
   rowTotal=list.length;page=Math.min(page,Math.max(1,Math.ceil(list.length/PAGE)));
   const pageList=list.slice((page-1)*PAGE,page*PAGE);
-  return `  ${list.length?pageList.map((c,i)=>{const [txt,me]=nextStep(c), shown=shownOf(c), hit=!tkF||shown.some(tkHit), fade=hit&&(catFilter||tkF||myF&&isSelm());return `<tr class="click${hit?'':' dim'}${rowAnim?' row-in':''}${c.id===flashId||impFlash&&c.importId===impFlash?' flash':''}" style="--i:${Math.min(i,12)}" data-a="open" data-id="${c.id}" tabindex="0">
+  return `  ${list.length?pageList.map((c,i)=>{const [txt,me]=nextStep(c), shown=shownOf(c), hit=!tkF||shown.some(tkHit), fade=hit&&(catFilter||tkF||myF&&canWork());return `<tr class="click${hit?'':' dim'}${rowAnim?' row-in':''}${c.id===flashId||impFlash&&c.importId===impFlash?' flash':''}" style="--i:${Math.min(i,12)}" data-a="open" data-id="${c.id}" tabindex="0">
     <td><div class="cname"><span class="mono">${esc(c.code)}</span><b>${esc(c.name)}</b></div></td>
     <td>${pill(healthLabel(c))}${auditFlag(c)}</td>
     <td>${shown.length?`<div class="catlist">${shown.map(t=>{const done=t.status===CLOSED,dis=t.closedAs==='Cancelled'||t.closedAs==='Discontinued';
@@ -264,7 +265,7 @@ function vCourse(){
   const c=course(view.id); if(!c){view={name:'courses'};return vCourses()}
   const st=stage(c), open=openOf(c.id), closed=ticketsOf(c.id).filter(t=>t.status===CLOSED);
   // My tickets uses the same switch as the course list; here it fades the other tickets and hides none
-  const myOpen=open.filter(t=>t.escalatedBy===user.name), onlyMine=myF&&isSelm();
+  const myOpen=open.filter(t=>t.escalatedBy===user.name), onlyMine=myF&&canWork();
   const runs=S.audits.filter(a=>a.courseId===c.id).sort((a,b)=>b.date-a.date);
   let btn='';
   if(c.lockedBy&&c.lockedBy!==user.name)btn=`<span class="muted small">🔒 Being audited by ${esc(c.lockedBy)}</span>`;
@@ -272,7 +273,7 @@ function vCourse(){
   else if(st==='healthy'&&!c.lockedBy&&isAud())btn=`<button class="btn" data-a="reaudit" data-id="${c.id}">Re-audit</button>`;
   else if(st==='audit'&&!isAud())btn=`<span class="muted small">Waiting for an auditor</span>`;
   const stats=`<div class="stats"><span>Audits <b>${runs.length}</b></span><span>Last audited <b>${fmtD(c.lastAudited)}</b>${c.lastAudited?` (${daysSince(c.lastAudited)}d ago)`:''}</span>
-      <span>By <b>${esc(c.lastAuditor||'—')}</b></span><span id="priceBox">${priceView(c)}</span><span id="audBox">${audView(c)}</span></div>`;
+      <span>By <b>${esc(c.lastAuditor||'—')}</b></span><span id="priceBox">${priceView(c)}</span><span id="audBox">${audView(c)}</span>${c.learningPlan?`<span>Learning plan <b class="mono">${esc(c.learningPlan)}</b></span>`:''}</div>`;
   return `<button class="link back" data-a="go" data-id="courses">← All courses</button>
   <div class="panel cover${st==='disc'?' gone':''}"><div class="chead"><div style="display:flex;flex-direction:column;gap:6px">
       <span class="mono muted">${esc(c.code)} · ${esc(c.type)}${open.length?` · ${open.length} open issue${open.length>1?'s':''}`:''}</span><h2>${esc(c.name)}</h2>
@@ -281,9 +282,9 @@ function vCourse(){
         :`<button class="btn danger" data-a="discCourse" data-id="${c.id}">Discontinue course</button>`):''}${isAud()&&st==='disc'?`<button class="btn" data-a="restoreCourse" data-id="${c.id}">Restore course</button>`:''}</div></div>
     ${stats}</div>
   ${draft&&draft.courseId===c.id&&c.lockedBy===user.name?`<div class="expander open done">${auditForm(c)}</div>`:''}
-  ${open.length||closed.length?`<div class="panel">${open.length?`<div class="panel-h"><h3>Open tickets (${open.length})</h3>${isAud()&&c.cycleAuditId?`<button class="btn sm" data-a="addTk" data-id="${c.id}">+ Add ticket</button>`:''}${isSelm()?`<button class="fchip mine" data-a="toggleMine" aria-pressed="${myF}">My tickets <b>${myOpen.length}</b></button>`:''}</div>
+  ${open.length||closed.length?`<div class="panel">${open.length?`<div class="panel-h"><h3>Open tickets (${open.length})</h3>${isAud()&&c.cycleAuditId?`<button class="btn sm" data-a="addTk" data-id="${c.id}">+ Add ticket</button>`:''}${canWork()?`<button class="fchip mine" data-a="toggleMine" aria-pressed="${myF}">My tickets <b>${myOpen.length}</b></button>`:''}</div>
     <div class="tree${animTree?' anim':''}" id="tree"><div class="tree-kids">${open.map((t,i)=>`<div class="tree-kid${onlyMine&&t.escalatedBy!==user.name?' faded':''}" data-slot="${t.id}" style="--i:${i}">${ticketRow(c,t,st)}</div>`).join('')}</div></div>`:''}
-    ${closed.length?`<details><summary>Closed tickets (${closed.length})</summary><div class="tree-kids closed-kids">${closed.map(t=>`<div class="tree-kid" data-slot="${t.id}">${ticketRow(c,t,st)}</div>`).join('')}</div></details>`:''}</div>`:''}
+    ${closed.length?`<details><summary>Closed tickets (${closed.length})${closed.some(t=>t.selfApproved)?` · <span class="tk-self-n">${closed.filter(t=>t.selfApproved).length} self-approved</span>`:''}</summary><div class="tree-kids closed-kids">${closed.map(t=>`<div class="tree-kid" data-slot="${t.id}">${ticketRow(c,t,st)}</div>`).join('')}</div></details>`:''}</div>`:''}
   ${infoLog(c)}
   <div class="panel"><h3>Audit history</h3>
     ${runs.length?`<div class="hist${openHist.has(c.id)?' open':''}" id="hist-${c.id}">${runs.map((a,i)=>`<div class="iter${i>=3?' old':''}"><span class="n">#${runs.length-i}</span><span class="mono">${fmtD(a.date)}</span>
@@ -334,7 +335,7 @@ const critChips=a=>{const no=CRITERIA.filter((_,j)=>a.checklist[j]==='No'),yes=a
 // pricing and audience as they were at that audit; a value that differs from the audit before it shows what it was
 const auditInfo=(a,prev)=>{const v=(k,f)=>a[k]===undefined?'—':f(a[k]),moved=k=>prev&&a[k]!==undefined&&prev[k]!==undefined&&prev[k]!==a[k];
   const part=(l,k,f)=>`<span>${l} ${moved(k)?`<s>${esc(f(prev[k]))}</s> → <b class="chg">${esc(v(k,f))}</b>`:`<b>${esc(v(k,f))}</b>`}</span>`;
-  return `<div class="ainfo">${part('Pricing','price',fmtPrice)}${part('Audience','audience',x=>x||'—')}</div>`};
+  return `<div class="ainfo">${part('Pricing','price',fmtPrice)}${part('Audience','audience',x=>x||'—')}${a.learningPlan?`<span>Learning plan <b>${esc(a.learningPlan)}</b></span>`:''}</div>`};
 // the auditor can correct the criteria of the current audit while its tickets are still open
 function critEditor(a){
   return `<div class="crit-edit"><div class="crit">${CRITERIA.map((l,i)=>`<div class="crit-row${a.checklist[i]==='No'?' no':''}"><span>${l}</span>
@@ -342,10 +343,10 @@ function critEditor(a){
     <div class="tk-btns"><span class="err" id="ckErr-${a.id}" style="margin-right:auto"></span><button class="btn primary sm" data-a="saveCrit" data-id="${a.id}">Save criteria</button><button type="button" class="btn sm tk-back" data-a="cancelCrit" data-id="${a.id}" aria-label="Back without saving" title="Back without saving"><span aria-hidden="true">←</span> Back</button></div></div>`;
 }
 const tkFoot=h=>`<div class="tk-btns tk-act">${h}</div>`;
-const waitText=t=>t.status==='New'?'Waiting for SELM':WORKING.includes(t.status)?`With ${esc(t.escalatedBy||'SELM')}`:'Waiting for auditor';
-const approveBox=t=>`<div class="tk-btns tk-act tk-approve"><button class="btn okb sm approve-big" data-a="approve" data-id="${t.id}"><span>${t.status===PV_DIS?'Approve cancel':'Approve'}</span></button><button class="btn sm" data-a="startReject" data-id="${t.id}">Reject</button></div>`;
+const waitText=t=>t.status==='New'?'Not escalated yet':WORKING.includes(t.status)?`With ${esc(t.escalatedBy||'SELM')}`:'Waiting for auditor';
+const approveBox=t=>`<div class="tk-btns tk-act tk-approve"><button class="btn okb sm approve-big" data-a="approve" data-id="${t.id}"><span>${t.status===PV_DIS?'Approve cancel':'Approve'}</span></button><button class="btn sm" data-a="startReject" data-id="${t.id}">Reject</button>${t.escalatedBy===user.name?`<button class="btn sm tk-undo" data-a="takeBack" data-id="${t.id}"><span aria-hidden="true">↶</span> Take back</button>`:''}</div>`;
 const rejectBox=t=>`<div class="tk-form"><label class="field grow"><span class="req">Reason for rejecting</span><input type="text" id="rej-${t.id}" placeholder="What still fails"></label>
-      <div class="tk-btns"><button class="btn danger sm" data-a="reject" data-id="${t.id}">Send back to SELM</button><button type="button" class="btn sm tk-back" data-a="cancelReject" aria-label="Back without sending" title="Back without sending"><span aria-hidden="true">←</span> Back</button></div></div>`;
+      <div class="tk-btns"><button class="btn danger sm" data-a="reject" data-id="${t.id}">Send back</button><button type="button" class="btn sm tk-back" data-a="cancelReject" aria-label="Back without sending" title="Back without sending"><span aria-hidden="true">←</span> Back</button></div></div>`;
 // redraw the page, then let each ticket card that is still there slide from where it was to where it is now
 function flipRender(closedPing){
   const pos={};document.querySelectorAll('.tree-kid .tk[data-tid]').forEach(k=>pos[k.dataset.tid]=k.parentElement.getBoundingClientRect());
@@ -377,7 +378,7 @@ function swapSelm(id,open){
   const h0=card.offsetHeight;part.outerHTML=open?selmForm(ticket(id)):selmAct(ticket(id));card.querySelector('.tk-act,.tk-form').classList.add('enter');glide(card,h0);return card;
 }
 // while a ticket is still New (no SELM has touched it) the auditor can correct or remove it
-const audAct=t=>`<div class="tk-btns tk-act tk-aud"><button class="btn sm" data-a="editTk" data-id="${t.id}">Edit</button><button class="btn danger sm" data-a="rmTk" data-id="${t.id}">Remove</button></div>`;
+const audAct=t=>`<div class="tk-btns tk-act tk-aud"><button class="btn escb sm" data-a="escalate" data-id="${t.id}"><span aria-hidden="true">↑</span> Escalate</button><button class="btn sm" data-a="editTk" data-id="${t.id}">Edit</button><button class="btn danger sm" data-a="rmTk" data-id="${t.id}">Remove</button></div>`;
 const audEdit=t=>`<div class="tk-form tk-aud"><label class="field"><span>Category</span><select id="ekCat-${t.id}">${CATS.map(x=>`<option${x===t.category?' selected':''}>${x}</option>`).join('')}</select></label>
       <label class="field grow"><span class="req">What is wrong</span><input type="text" id="ekDesc-${t.id}" value="${esc(t.detail)}"></label>
       <div class="tk-btns"><button class="btn primary sm" data-a="saveTk" data-id="${t.id}">Save</button><button type="button" class="btn sm tk-back" data-a="cancelTk" data-id="${t.id}" aria-label="Back without saving" title="Back without saving"><span aria-hidden="true">←</span> Back</button></div>
@@ -409,7 +410,7 @@ const selmForm=t=>`<div class="tk-form">
       <label class="field"><span>Tentative fix date</span><input type="date" id="fix-${t.id}" min="${toInput(Date.now())}" value="${formDrafts[draftKey(t.id)]?.fix??(t.fixDate?toInput(t.fixDate):'')}"></label>
       <label class="field grow"><span>Note</span><input type="text" id="note-${t.id}" placeholder="Progress, owner, or reason to cancel" value="${esc(formDrafts[draftKey(t.id)]?.note||'')}"></label>
       <span class="err" id="fixErr-${t.id}"></span>
-      <div class="tk-btns"><button class="btn sm" data-a="saveT" data-id="${t.id}">Save</button><button class="btn okb sm" data-a="resolveT" data-id="${t.id}">Resolved</button><button class="btn danger sm" data-a="discT" data-id="${t.id}">Cancel</button>${canUndoEsc(t)?`<button type="button" class="btn sm" data-a="undoEsc" data-id="${t.id}" title="Put it back to New for any SELM"><span aria-hidden="true">↶</span> Undo escalate</button>`:''}<button type="button" class="btn sm tk-back" data-a="cancelT" aria-label="Back without saving" title="Back without saving (Esc)"><span aria-hidden="true">←</span> Back</button></div></div>`;
+      <div class="tk-btns"><button class="btn sm" data-a="saveT" data-id="${t.id}">Save</button><button class="btn okb sm" data-a="resolveT" data-id="${t.id}">Resolved</button><button class="btn danger sm" data-a="discT" data-id="${t.id}">Cancel</button>${canUndoEsc(t)?`<button type="button" class="btn sm" data-a="undoEsc" data-id="${t.id}" title="Put it back to New"><span aria-hidden="true">↶</span> Undo escalate</button>`:''}<button type="button" class="btn sm tk-back" data-a="cancelT" aria-label="Back without saving" title="Back without saving (Esc)"><span aria-hidden="true">←</span> Back</button></div></div>`;
 // shown only in the focus view: the facts that matter
 function focusSummary(t){
   const moves=movesOf(t), esc1=S.logs.find(l=>l.ticketId===t.id&&l.action==='Escalated'), who=S.audits.find(a=>a.id===t.auditId)?.auditor;
@@ -426,15 +427,15 @@ function ticketRow(c,t,st){
   let below='';
   if(t.status===CLOSED)below='';
   else if(isSelm()&&t.status==='New')below=tkFoot(`<button class="btn escb sm" data-a="escalate" data-id="${t.id}"><span aria-hidden="true">↑</span> Escalate</button>`);
-  else if(isSelm()&&WORKING.includes(t.status)&&mine(t))below=editingT===t.id?selmForm(t):selmAct(t);
-  else if(isSelm()&&WORKING.includes(t.status)&&!mine(t))below=tkFoot(`<span class="muted small">With ${esc(t.escalatedBy)}</span><button class="btn sm tk-undo" data-a="takeOver" data-id="${t.id}"><span aria-hidden="true">⇄</span> Take over</button>`);
+  else if(canWork()&&WORKING.includes(t.status)&&mine(t))below=editingT===t.id?selmForm(t):selmAct(t);
+  else if(canWork()&&WORKING.includes(t.status)&&!mine(t))below=tkFoot(`<span class="muted small">With ${esc(t.escalatedBy)}</span><button class="btn sm tk-undo" data-a="takeOver" data-id="${t.id}"><span aria-hidden="true">⇄</span> Take over</button>`);
   else if(isSelm()&&pv&&mine(t))below=tkFoot(`<span class="muted small">Waiting for auditor</span><button class="btn sm tk-undo" data-a="takeBack" data-id="${t.id}"><span aria-hidden="true">↶</span> Take back</button>`);
   else if(isAud()&&t.status==='New')below=audAct(t);
   else if(isAud()&&pv)below=rejecting===t.id?rejectBox(t):approveBox(t);
   else below=tkFoot(`<span class="muted small">${waitText(t)}</span>`);
   const eta=t.status===CLOSED?`Closed ${fmtD(t.closedAt)} · ${t.closedAs}`:t.fixDate?`ETA ${week(t.fixDate)} · ${fmtD(t.fixDate)}`:'ETA TBD';
   return `<div class="tk${t.id===flashId?' flash':''}" data-tid="${t.id}"><div class="tk-main">
-    <div class="tk-top"><span class="mono muted">${t.id}</span><b>${esc(t.category)}</b><span class="st ${tone(t.status)}" title="${esc(t.status)}"><i></i>${esc(shortStatus(t.status))}</span>
+    <div class="tk-top"><span class="mono muted">${t.id}</span><b>${esc(t.category)}</b><span class="st ${tone(t.status)}" title="${esc(t.status)}"><i></i>${esc(shortStatus(t.status))}</span>${t.selfApproved?'<span class="tk-self" title="The same person handled and approved this ticket">Self-approved</span>':''}
       ${isOverdue(t)?`<span class="late">${slaLate(t)}</span>`:etaMissed(t)?`<span class="late">ETA missed ${etaMissed(t)}d</span>`:''}<span class="tk-eta">${eta}</span><button type="button" class="tk-expand" data-a="focusT" data-id="${t.id}" aria-label="Expand ${t.id}" title="Expand"><span aria-hidden="true">⤢</span></button></div>
     <div class="tk-dates">Raised ${fmtD(t.createdAt)}${slaLeft(t)?` · ${slaLeft(t)}`:''}${movesOf(t)?` · Moved ${movesOf(t)}×${t.firstFix?`, first ETA ${fmtD(t.firstFix)}`:''}`:''}</div>
     <div class="tk-desc">${esc(t.detail)}</div>${note}${records(t)}${focusSummary(t)}</div>
@@ -465,7 +466,7 @@ function records(t){
 function auditForm(c){
   const d=draft;
   return `<form class="audit" id="auditForm" novalidate>
-  <div class="audit-h"><h3>Audit #${S.audits.filter(a=>a.courseId===c.id).length+1}</h3><button type="button" class="btn sm" data-a="cancelAudit" data-id="${c.id}">Cancel audit</button></div>
+  <div class="audit-h"><h3>Audit #${S.audits.filter(a=>a.courseId===c.id).length+1}</h3><div class="audit-h-act"><label class="lp-tick"><input type="checkbox" id="fLpOn"${draft.lpOn?' checked':''}> Part of learning plan</label><input type="text" id="fLp" class="lp-code" placeholder="Course code" aria-label="Learning plan course code" autocomplete="off" value="${esc(draft.lp)}"${draft.lpOn?'':' hidden'}><button type="button" class="btn sm" data-a="cancelAudit" data-id="${c.id}">Cancel audit</button></div></div>
   <div class="audit-b">
     ${d.re?`<div class="info-fields locked"><div class="field"><span>Docebo pricing</span><b>${fmtPrice(c.price)}</b></div>
       <div class="field"><span>Catalog audience</span><b>${esc(c.audience||'—')}</b></div></div>`
@@ -500,10 +501,13 @@ function submitAudit(){
   if(left&&!draft.crit.includes('No'))return err(`Answer all criteria (${left} left), or mark the failed ones No.`);
   const price=toPrice(draft.price);
   if(Number.isNaN(price))return err('Docebo pricing must be a number of 0 or more.');
-  // a re-audit is saved when it finds a No or changes an answer (e.g. Yes → N/A); otherwise Cancel audit keeps it as it was
-  if(draft.re&&!draft.crit.includes('No')&&draft.base&&draft.crit.join()===draft.base.join())
+  const learningPlan=draft.lpOn?cleanCode(draft.lp):'';
+  if(draft.lpOn&&!learningPlan){$('#fLp')?.focus();return err('Enter the course code of the learning plan.')}
+  if(learningPlan&&codeKey(learningPlan)===codeKey(c.code)){$('#fLp')?.focus();return err("The learning plan code can't be this course's own code.")}
+  // a re-audit is saved when it finds a No or changes an answer (e.g. Yes → N/A) or the learning plan; otherwise Cancel audit keeps it as it was
+  if(draft.re&&!draft.crit.includes('No')&&draft.base&&draft.crit.join()===draft.base.join()&&learningPlan===(c.learningPlan||''))
     return err('Nothing changed. Mark a criterion No or N/A, or use Cancel audit to keep it Healthy.');
-  const audience=draft.aud.join(', '), info={price,audience}, ts=Date.now();
+  const audience=draft.aud.join(', '), info={price,audience,learningPlan}, ts=Date.now();
   const started=c.lockedAt?` · started ${fmtDT(c.lockedAt)}`:'';
   if(draft.crit.includes('No')){
     const bad=draft.issues.findIndex(x=>!x.desc.trim()||!x.cat);
@@ -512,7 +516,7 @@ function submitAudit(){
       return openModal(`<div class="ov-h"><h3>Mark ${esc(c.code)} Unhealthy?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
         <div class="ov-b"><p style="margin:0">${n} criteri${n>1?'a':'on'} marked No. The course changes from Healthy to Unhealthy and ${k} ticket${k>1?'s are':' is'} created.</p></div>
         <div class="ov-f"><button class="btn" data-a="close">Back to form</button><button class="btn danger" data-a="confirmFail">Mark Unhealthy</button></div>`)}
-    c.price=price;c.audience=audience;
+    c.price=price;c.audience=audience;c.learningPlan=learningPlan;
     const a=addAudit(c,'Failed',draft.crit.map(v=>v||'Yes'),info,draft.issues.map(x=>({...x})));
     const made=draft.issues.map(x=>{const t={id:'TKT-'+S.seq.t++,courseId:c.id,auditId:a.id,category:x.cat,detail:x.desc.trim(),status:'New',createdAt:ts,createdBy:user.name,
       escalatedAt:null,escalatedBy:null,fixDate:null,notes:[],justification:null,rejection:null,closedAt:null,closedAs:null};S.tickets.push(t);return t});
@@ -520,7 +524,7 @@ function submitAudit(){
     log({courseId:c.id,ticketIds:made.map(t=>t.id),action:'Audit failed',detail:`${made.length} ticket(s) created: ${made.map(t=>`${t.id} ${t.category}`).join(', ')}${started}`});
     var msg=`Unhealthy · created ${made.map(t=>t.id).join(', ')}`, fill='--bad', label=`${made.length} ticket${made.length>1?'s':''} created`;
   }else{
-    c.price=price;c.audience=audience;
+    c.price=price;c.audience=audience;c.learningPlan=learningPlan;
     addAudit(c,'Passed',[...draft.crit],info);
     c.health='Healthy';c.auditorStatus='Completed';c.auditCount++;c.lastAudited=ts;c.lastAuditor=user.name;
     log({courseId:c.id,action:'Audit passed',detail:`Iteration ${c.auditCount}${started}`});
@@ -549,6 +553,26 @@ function critPanel(){
 }
 // long dashboard lists show the first few; the rest open on request
 const LIST_MAX=5, listOpen=new Set();
+// a small "i" beside a title: the explanation shows on hover, on keyboard focus and on tap
+const infoTip=text=>`<button type="button" class="info-tip" aria-label="${esc(text)}"><span class="info-i" aria-hidden="true">i</span><span class="info-pop" aria-hidden="true">${esc(text)}</span></button>`;
+// everything past its deadline, in one list: the longest overdue first
+const ALERT_KINDS=[['audit','Not audited'],['esc','Not escalated'],['fix','No fix date'],['eta','Fix date missed']];
+let alertF='all';
+function alertRows(){const rows=[];
+  S.courses.filter(auditLate).forEach(c=>rows.push({kind:'audit',c,t:null,owner:'Auditors',late:Math.max(1,daysSince(pendingSince(c))-7)}));
+  S.tickets.filter(t=>t.status!==CLOSED).forEach(t=>{const c=course(t.courseId);
+    if(isOverdue(t))rows.push(t.status==='New'?{kind:'esc',c,t,owner:'Not assigned',late:Math.max(1,daysSince(slaFrom(t))-7)}:{kind:'fix',c,t,owner:t.escalatedBy||'—',late:Math.max(1,daysSince(slaFrom(t))-7)});
+    else if(etaMissed(t))rows.push({kind:'eta',c,t,owner:t.escalatedBy||'—',late:etaMissed(t)})});
+  return rows.sort((a,b)=>b.late-a.late)}
+function alertPanel(){const all=alertRows(),count=k=>all.filter(r=>r.kind===k).length,kinds=ALERT_KINDS.filter(([k])=>count(k));
+  if(!all.length)return `<div class="panel alert-panel calm" id="alertPanel"><h3>Needs attention <b class="alert-n">0</b></h3><span class="muted">Nothing is overdue.</span></div>`;
+  if(alertF!=='all'&&!count(alertF))alertF='all';
+  const rows=alertF==='all'?all:all.filter(r=>r.kind===alertF),label=k=>ALERT_KINDS.find(x=>x[0]===k)[1],shown=listOpen.has('alerts')?rows:rows.slice(0,LIST_MAX);
+  return `<div class="panel alert-panel" id="alertPanel"><div class="panel-h"><h3>Needs attention <b class="alert-n">${all.length}</b></h3>
+    <div class="alert-chips">${kinds.length>1?`<button class="fchip" data-a="alertF" data-id="all" aria-pressed="${alertF==='all'}">All <b>${all.length}</b></button>`:''}${kinds.map(([k,l])=>`<button class="fchip" data-a="alertF" data-id="${k}" aria-pressed="${alertF===k}">${l} <b>${count(k)}</b></button>`).join('')}</div></div>
+    <div class="tbl-wrap"><table class="alert-tbl"><thead><tr><th>Problem</th><th>Course</th><th>Ticket</th><th>Owner</th><th>Late by</th></tr></thead><tbody>
+    ${shown.map(r=>`<tr class="click" data-a="open" data-id="${r.c.id}" tabindex="0"><td class="nowrap"><span class="alert-kind k-${r.kind}">${label(r.kind)}</span></td><td><span class="mono">${esc(r.c.code)}</span><div class="muted small">${esc(r.c.name)}</div></td><td>${r.t?`<span class="mono nowrap">${r.t.id}</span><div class="muted small">${esc(r.t.category)}</div>`:'<span class="muted">—</span>'}</td><td class="nowrap">${esc(r.owner)}</td><td class="nowrap move-hi">${r.late}d</td></tr>`).join('')}</tbody></table></div>
+    ${rows.length>LIST_MAX?`<div><button class="link" data-a="toggleAlerts">${listOpen.has('alerts')?'Show less':`+${rows.length-LIST_MAX} more`}</button></div>`:''}</div>`}
 const moreBtn=(n,k)=>n>LIST_MAX?` <button class="link" data-a="toggleList" data-id="${k}">${listOpen.has(k)?'Show less':`+${n-LIST_MAX} more`}</button>`:'';
 // the reason behind a ticket's latest fix date move: the note saved with it
 function moveReason(t){const ls=S.logs.filter(l=>l.ticketId===t.id),i=ls.map(l=>l.action).lastIndexOf('Fix date changed');
@@ -556,7 +580,7 @@ function moveReason(t){const ls=S.logs.filter(l=>l.ticketId===t.id),i=ls.map(l=>
 // open tickets whose fix date has moved, most moved first
 function movesPanel(open){
   const rows=open.filter(t=>movesOf(t)).sort((a,b)=>movesOf(b)-movesOf(a)||a.fixDate-b.fixDate);
-  return `<div class="panel"><h3>Fix date changes (${rows.length})</h3>${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>Ticket</th><th>Course</th><th>SELM</th><th>Moved</th><th>First ETA</th><th>Current ETA</th><th>Latest reason</th></tr></thead><tbody>
+  return `<div class="panel"><h3>Fix date changes (${rows.length})</h3>${rows.length?`<div class="tbl-wrap"><table><thead><tr><th>Ticket</th><th>Course</th><th>Owner</th><th>Moved</th><th>First ETA</th><th>Current ETA</th><th>Latest reason</th></tr></thead><tbody>
     ${rows.slice(0,listOpen.has('moves')?rows.length:LIST_MAX).map(t=>{const c=course(t.courseId),n=movesOf(t);return `<tr><td class="nowrap"><button class="link mono" data-a="open" data-id="${t.courseId}">${t.id}</button></td><td>${c?esc(c.code):'—'}</td><td class="nowrap">${esc(t.escalatedBy||'—')}</td>
       <td class="mono${n>=2?' move-hi':''}">${n}×</td><td class="mono nowrap">${fmtD(t.firstFix)}</td>
       <td class="mono nowrap${etaMissed(t)?' move-hi':''}">${fmtD(t.fixDate)}</td><td class="move-why">${esc(moveReason(t))||'—'}</td></tr>`}).join('')}</tbody></table></div>${moreBtn(rows.length,'moves')}`
@@ -565,7 +589,6 @@ function movesPanel(open){
 function vDash(){
   const cs={};STAGES.forEach(([k])=>cs[k]=0);S.courses.forEach(c=>{if(stage(c)!=='disc')cs.all++;cs[stage(c)]++});
   const open=S.tickets.filter(t=>t.status!==CLOSED), overdue=S.tickets.filter(isOverdue), lateAud=S.courses.filter(auditLate), notEsc=overdue.filter(t=>t.status==='New'), noFix=overdue.filter(t=>t.status!=='New'), missed=open.filter(etaMissed);
-  const tkLinks=(l,k)=>{const all=listOpen.has(k);return l.slice(0,all?l.length:LIST_MAX).map(t=>`<button class="link" data-a="open" data-id="${t.courseId}">${t.id}</button>`).join(', ')+moreBtn(l.length,k)};
   const catCounts=CATS.map(c=>[c,open.filter(t=>t.category===c).length]).filter(x=>x[1]);
   const maxC=Math.max(1,...catCounts.map(x=>x[1]));
   const etaT=S.tickets.filter(t=>WORKING.includes(t.status));
@@ -581,16 +604,13 @@ function vDash(){
   <span class="sec-label">Courses</span>
   <div class="metric hero" style="--tone:var(--accent)"><button class="hero-link" data-a="dashGo" data-id="c:all"><b>${cs.all}</b><span>Active courses</span></button><small class="hero-sla${lateAud.length?' bad':''}">${lateAud.length} not audited in 7d</small>${foldBtn('courses')}</div>
   <div class="fold-box${fold.courses?' shut':''}" id="fold-courses"><div class="metrics">${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to revalidate','--pv','verify')}${m(cs.audit,'Pending audit','--warn','audit')}</div></div>
-  ${lateAud.length?`<div class="alert"><span>⚠</span><div><b>${lateAud.length} course${lateAud.length>1?'s':''} not audited within 7 days.</b> ${lateAud.slice(0,listOpen.has('lateAud')?lateAud.length:LIST_MAX).map(c=>`<button class="link" data-a="open" data-id="${c.id}">${esc(c.code)}</button>`).join(', ')}${moreBtn(lateAud.length,'lateAud')}</div></div>`:''}
-  ${notEsc.length?`<div class="alert"><span>⚠</span><div><b>${notEsc.length} ticket${notEsc.length>1?'s':''} not escalated within 7 days.</b> SELM and Auditor groups notified: ${tkLinks(notEsc,'notEsc')}</div></div>`:''}
-  ${noFix.length?`<div class="alert"><span>⚠</span><div><b>${noFix.length} ticket${noFix.length>1?'s':''} with no fix date 7 days after escalation.</b> SELM and Auditor groups notified: ${tkLinks(noFix,'noFix')}</div></div>`:''}
-  ${missed.length?`<div class="alert"><span>⚠</span><div><b>${missed.length} ticket${missed.length>1?'s':''} past the fix date.</b> ${tkLinks(missed,'missed')}</div></div>`:''}
+  ${alertPanel()}
   <span class="sec-label">Tickets</span>
   <div class="metric hero" style="--tone:var(--accent)"><button class="hero-link" data-a="dashGo" data-id="t:open"><b>${open.length}</b><span>Open tickets</span></button><small class="hero-sla${overdue.length||missed.length?' bad':''}">${notEsc.length} not escalated in 7d · ${noFix.length} no fix date in 7d · ${missed.length} ETA missed</small>${foldBtn('tickets')}</div>
   <div class="fold-box${fold.tickets?' shut':''}" id="fold-tickets"><div class="metrics">${tm(S.tickets.filter(t=>t.status==='New').length,'New','--warn','New')}${tm(S.tickets.filter(t=>t.status==='Retest Failed').length,'Retest Failed','--bad','Retest Failed')}${tm(S.tickets.filter(t=>t.status==='Escalated').length,'Escalated','--info','Escalated')}${tm(S.tickets.filter(t=>t.status==='In Progress').length,'In Progress','--accent','In Progress')}${tm(S.tickets.filter(t=>t.status===PV_RES||t.status===PV_DIS).length,'Waiting for verification','--pv','verify')}</div></div>
   <div class="grid2">
     <div class="panel"><h3>Open tickets by category</h3><div class="bars">${catCounts.length?catCounts.map(([c,n])=>`<div class="bar"><span>${esc(c)}</span><div class="track"><div class="fill" style="width:${n/maxC*100}%"></div></div><span class="v">${n}</span></div>`).join(''):'<span class="muted">No open tickets</span>'}</div></div>
-    <div class="panel"><h3>Fix ETA by week</h3><div class="bars">${bKeys.length?bKeys.map(k=>`<div class="bar"><span class="mono">${k}</span><div class="track"><div class="fill" style="width:${buckets[k].length/maxB*100}%;${k==='TBD'?'background:var(--warn)':''}"></div></div><span class="v">${buckets[k].length}</span></div>`).join(''):'<span class="muted">Nothing scheduled</span>'}</div></div>
+    <div class="panel"><h3 class="has-tip">Fix ETA by week${infoTip('Tickets being worked on, grouped by tentative fix date. TBD means no date is set yet.')}</h3><div class="bars">${bKeys.length?bKeys.map(k=>`<div class="bar"><span class="mono">${k}</span><div class="track"><div class="fill" style="width:${buckets[k].length/maxB*100}%;${k==='TBD'?'background:var(--warn)':''}"></div></div><span class="v">${buckets[k].length}</span></div>`).join(''):'<span class="muted">Nothing scheduled</span>'}</div></div>
   </div>
   ${movesPanel(open)}
   ${critPanel()}
@@ -600,7 +620,7 @@ function vDash(){
     <button class="btn sm" data-a="rToday">Today</button><button class="btn sm" data-a="rWeek">7 days</button></div></div>
     <div class="kv"><div><b>${cnt('Audit passed')+cnt('Re-verification approved')}</b><span>Audits passed</span></div><div><b>${cnt('Audit failed')}</b><span>Audits failed</span></div>
     <div><b>${inR.reduce((n,l)=>n+(l.ticketIds?.length||0),0)+cnt('Added after audit')}</b><span>Tickets opened</span></div><div><b>${cnt('Escalated')}</b><span>Escalated</span></div>
-    <div><b>${cnt('Ticket closed')}</b><span>Tickets closed</span></div><div><b>${cnt('Retest failed')+cnt('Cancellation rejected')+cnt('Discontinuation rejected')}</b><span>Sent back</span></div></div></div>`;
+    <div><b>${cnt('Ticket closed')}</b><span>Tickets closed</span></div><div><b>${inR.filter(l=>l.action==='Ticket closed'&&/self-approved/.test(l.detail)).length}</b><span>Self-approved</span></div><div><b>${cnt('Retest failed')+cnt('Cancellation rejected')+cnt('Discontinuation rejected')}</b><span>Sent back</span></div></div></div>`;
 }
 
 /* ---------- team ---------- */
@@ -612,7 +632,7 @@ const inPeriod=t=>{if(teamP==='all')return true;const n=new Date();return t>=new
 function auditorStats(name){
   const all=S.audits.filter(a=>a.auditor===name), runs=all.filter(a=>a.note!==REVERIFY&&inPeriod(a.date));
   return {audits:runs.length,courses:new Set(runs.map(a=>a.courseId)).size,issues:S.tickets.filter(t=>t.createdBy===name&&inPeriod(t.createdAt)).length,
-    verified:S.logs.filter(l=>l.actor===name&&l.action==='Ticket closed'&&ticket(l.ticketId)?.closedAs==='Resolved'&&inPeriod(l.ts)).length,last:all.length?Math.max(...all.map(a=>a.date)):null};
+    verified:S.logs.filter(l=>l.actor===name&&l.action==='Ticket closed'&&ticket(l.ticketId)?.closedAs==='Resolved'&&!ticket(l.ticketId)?.selfApproved&&inPeriod(l.ts)).length,last:all.length?Math.max(...all.map(a=>a.date)):null};
 }
 const periodChips=()=>`<div class="chips-bar">${[['month','This month'],['all','All time']].map(([k,l])=>`<button class="fchip" data-a="teamP" data-id="${k}" aria-pressed="${teamP===k}">${l}</button>`).join('')}</div>`;
 const avatar=(u,cls)=>`<span class="avatar${cls?' '+cls:''}" aria-hidden="true">${esc(u.name[0])}</span>`;
@@ -1048,7 +1068,7 @@ const A={
     justSaved[id]=Date.now();const nu=swapCard(id,true);nu?.querySelector('.recs li')?.classList.add('new');
     nu?.querySelector('.tk-btns')?.insertAdjacentHTML('beforeend','<span class="tk-saved ok">✓ Saved</span>');toast(`${id} updated`)},
   rmTk(id){const t=ticket(id);
-    if(openOf(t.courseId).length<=1)return toast(`${id} is the only open ticket, so it can't be removed. Edit it instead, or let the SELM cancel it.`);
+    if(openOf(t.courseId).length<=1)return toast(`${id} is the only open ticket, so it can't be removed. Edit it instead, or escalate and cancel it.`);
     openModal(`<div class="ov-h"><h3>Remove ${id}?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
       <div class="ov-b"><p style="margin:0">${esc(t.category)} · ${esc(t.detail)}</p><p class="muted small" style="margin:0">It hasn't been escalated yet, so it's deleted. The removal is kept in the audit history.</p></div>
       <div class="ov-f"><button class="btn" data-a="close">Keep ticket</button><button class="btn danger" data-a="doRmTk" data-id="${id}">Remove ticket</button></div>`)},
@@ -1080,6 +1100,8 @@ const A={
     $('#search').value='';['statusF','catFilter','auditedF'].forEach(id=>{$('#'+id).value='';$('#'+id).classList.remove('on')});refreshRows()},
   reset(){openModal(`<div class="ov-h"><h3>Clear all data?</h3><button class="x" data-a="close" aria-label="Close">×</button></div><div class="ov-b">All courses, audits, tickets and history in this browser will be removed.</div><div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn danger" data-a="doReset">Clear</button></div>`)},
   // sample courses show every SLA state; they sit beside real data and come out again on their own
+  alertF(k){alertF=k;$('#alertPanel').outerHTML=alertPanel()},
+  toggleAlerts(){listOpen.has('alerts')?listOpen.delete('alerts'):listOpen.add('alerts');$('#alertPanel').outerHTML=alertPanel()},
   toggleList(k){listOpen.has(k)?listOpen.delete(k):listOpen.add(k);render()},
   samples(){const had=S.courses.some(c=>c.sample);had?removeSamples():addSamples();save();render();
     toast(had?'7-day samples removed':'7-day samples added · 5 courses, 7 tickets')},
@@ -1087,7 +1109,7 @@ const A={
   startAudit(id,re){const c=course(id);c.lockedBy=user.name;c.lockedAt=Date.now();if(!re)c.auditorStatus='In Progress';
     const last=re?S.audits.filter(a=>a.courseId===id&&a.checklist?.length===8).sort((a,b)=>b.date-a.date)[0]?.checklist:null;
     const base=last?last.map(v=>v==='N/A'?'N/A':'Yes'):null;
-    draft={courseId:id,crit:base?[...base]:Array(8).fill(null),base,price:c.price??'',aud:audList(c.audience),issues:[],re:!!re};draftStart=JSON.stringify(draft);save();
+    draft={courseId:id,crit:base?[...base]:Array(8).fill(null),base,price:c.price??'',aud:audList(c.audience),lpOn:!!c.learningPlan,lp:c.learningPlan||'',issues:[],re:!!re};draftStart=JSON.stringify(draft);save();
     // open the form in place instead of re-rendering the page
     refreshInfo(c);
     const b=document.querySelector('[data-a=startAudit],[data-a=reaudit]'),p=b?.closest('.panel');if(!p){render();return}
@@ -1172,17 +1194,17 @@ const A={
     swapCard(id,true)?.querySelector('.tk-form')?.classList.add('enter');toast(`${id} is now yours`)},
   takeBack(id){const t=ticket(id);if(!mine(t))return toast(`Only ${t.escalatedBy} can update ${id}`);
     if(t.status!==PV_RES&&t.status!==PV_DIS)return toast(`${id} was already checked by the auditor`);
-    const was=shortStatus(t.status);t.status=t.fixDate?'In Progress':'Escalated';t.justification=null;tlog(t,'Taken back',`${was} withdrawn by SELM`);
+    const was=shortStatus(t.status);t.status=t.fixDate?'In Progress':'Escalated';t.justification=null;tlog(t,'Taken back',`${was} withdrawn by ${user.name}`);
     editingT=id;flashId=id;save();flipRender();$(`#note-${id}`)?.focus();toast(`${id} taken back · edit and send again`)},
   // Resolved asks once more, since it hands the ticket to the auditor; the form stays open behind the dialog
   resolveT(id){const t=ticket(id);if(!mine(t))return toast(`Only ${t.escalatedBy} can update ${id}`);if(!fixFormOk(t,true))return;
     openModal(`<div class="ov-h"><h3>Mark ${id} as resolved?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
-    <div class="ov-b"><p style="margin:0">${esc(t.category)} · ${esc(t.detail)}</p><p class="muted small" style="margin:0">It goes to the auditor to verify the fix. You can take it back until they check it.</p></div>
+    <div class="ov-b"><p style="margin:0">${esc(t.category)} · ${esc(t.detail)}</p><p class="muted small" style="margin:0">${isAud()?'It moves to verification. If you approve it yourself, it is marked Self-approved.':'It goes to the auditor to verify the fix. You can take it back until they check it.'}</p></div>
     <div class="ov-f"><button class="btn" data-a="close">Back</button><button class="btn okb" data-a="doResolveT" data-id="${id}">Yes, resolved</button></div>`)},
   doResolveT(id){closeOv();if(!$(`#fix-${id}`)||!mine(ticket(id)))return toast(`${id} has changed; nothing was sent`);if(A.saveT(id,true)===false)return;const t=ticket(id);t.status=PV_RES;tlog(t,'Marked resolved','Sent for auditor verification');editingT=null;flashId=id;save();render();toast(`${id} sent for verification`)},
   discT(id){if(!mine(ticket(id)))return toast(`Only ${ticket(id).escalatedBy} can update ${id}`);const note=$(`#note-${id}`).value.trim();if(!note){$(`#note-${id}`).focus();toast('Add a note with the reason');return}
     const t=ticket(id);openModal(`<div class="ov-h"><h3>Ask to cancel ${id}?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
-    <div class="ov-b"><p style="margin:0">${esc(t.category)} · ${esc(t.detail)}</p><p style="margin:0"><b>Reason:</b> ${esc(note)}</p><p class="muted small" style="margin:0">It goes to the auditor, who decides whether to close it. You can take it back until they check it.</p></div>
+    <div class="ov-b"><p style="margin:0">${esc(t.category)} · ${esc(t.detail)}</p><p style="margin:0"><b>Reason:</b> ${esc(note)}</p><p class="muted small" style="margin:0">${isAud()?'It moves to verification. If you approve it yourself, it is marked Self-approved.':'It goes to the auditor, who decides whether to close it. You can take it back until they check it.'}</p></div>
     <div class="ov-f"><button class="btn" data-a="close">Back</button><button class="btn danger" data-a="doDiscT" data-id="${id}">Yes, cancel ticket</button></div>`)},
   doDiscT(id){closeOv();const t=ticket(id),box=$(`#note-${id}`);if(!box||!mine(t))return toast(`${id} has changed; nothing was sent`);const note=box.value.trim();delete formDrafts[draftKey(id)];t.notes.push({ts:Date.now(),by:user.name,text:note});t.status=PV_DIS;t.justification=note;tlog(t,'Proposed cancellation',note);editingT=null;flashId=id;save();render();toast(`${id} sent for verification`)},
   startReject(id){if(rejecting)A.cancelReject();
@@ -1192,7 +1214,7 @@ const A={
     if(!el)return render();el.outerHTML=approveBox(ticket(id));relayout()},
   approve(id){const t=ticket(id),last=openOf(t.courseId).length===1;
     openModal(`<div class="ov-h"><h3>${t.status===PV_DIS?`Approve cancelling ${id}?`:`Approve ${id}?`}</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
-    <div class="ov-b"><p style="margin:0">${esc(t.category)} · ${esc(t.detail)}</p><p class="muted small" style="margin:0">The ticket closes and can't be reopened.${last?' It is the last open ticket, so the course becomes Healthy.':''}</p></div>
+    <div class="ov-b"><p style="margin:0">${esc(t.category)} · ${esc(t.detail)}</p><p class="muted small" style="margin:0">The ticket closes and can't be reopened.${last?' It is the last open ticket, so the course becomes Healthy.':''}</p>${t.escalatedBy===user.name?'<p class="warn-line" style="margin:0">You handled this ticket, so it will be marked Self-approved.</p>':''}</div>
     <div class="ov-f"><button class="btn" data-a="close">Back</button><button class="btn okb" data-a="confirmApprove" data-id="${id}">Yes, approve</button></div>`)},
   confirmApprove(id){closeOv();const b=document.querySelector(`.approve-big[data-id="${id}"]`);
     if(!b||matchMedia('(prefers-reduced-motion: reduce)').matches)return A.doApprove(id);
@@ -1201,14 +1223,14 @@ const A={
     setTimeout(()=>{b.querySelector('span').textContent='✓ Approved';b.classList.add('done')},650);
     setTimeout(()=>A.doApprove(id),1150)},
   doApprove(id){const t=ticket(id),c=course(t.courseId);
-    t.closedAs=t.status===PV_DIS?'Cancelled':'Resolved';t.status=CLOSED;t.closedAt=Date.now();tlog(t,'Ticket closed',`Approved (${t.closedAs})`);
+    t.closedAs=t.status===PV_DIS?'Cancelled':'Resolved';t.status=CLOSED;t.closedAt=Date.now();t.selfApproved=t.escalatedBy===user.name;tlog(t,'Ticket closed',`Approved (${t.closedAs})${t.selfApproved?' · self-approved':''}`);
     const r=closeCycle(c);save();
     // the approved card fades out, then the other cards slide into its place and Closed tickets lights up
     const kid=document.querySelector(`.tree-kid .tk[data-tid="${id}"]`)?.parentElement,done=()=>{flipRender(true);toast(`${id} closed`+(r?` · ${r}`:''))};
     if(!kid||matchMedia('(prefers-reduced-motion: reduce)').matches)return done();
     kid.animate([{opacity:1,transform:'none'},{opacity:0,transform:'scale(.95)'}],{duration:260,easing:'ease-in',fill:'forwards'}).onfinish=done},
   reject(id){const t=ticket(id),n=$(`#rej-${id}`).value.trim();if(!n){$(`#rej-${id}`).focus();toast('Add rejection notes first');return}
-    const dis=t.status===PV_DIS;rejecting=null;t.status='Retest Failed';t.rejection=n;tlog(t,dis?'Cancellation rejected':'Retest failed',n);flashId=id;save();render();toast(`${id} sent back to SELM`)},
+    const dis=t.status===PV_DIS;rejecting=null;t.status='Retest Failed';t.rejection=n;tlog(t,dis?'Cancellation rejected':'Retest failed',n);flashId=id;save();render();toast(`${id} sent back`)},
   editCrit(id){const a=S.audits.find(x=>x.id===id),box=$('#ck-'+id);if(!a||!box)return;
     document.querySelector(`[data-a=editCrit][data-id="${id}"]`)?.setAttribute('hidden','');box.innerHTML=critEditor(a)},
   cancelCrit(id){const a=S.audits.find(x=>x.id===id);$('#ck-'+id).innerHTML=critChips(a);
@@ -1260,12 +1282,14 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='Escape'&&focusT)closeFocus();
   if(e.target.id==='priceIn'&&(e.key==='Enter'||e.key==='Escape')){e.preventDefault();A[e.key==='Enter'?'savePrice':'cancelPrice'](e.target.closest('.price-edit').querySelector('[data-a=savePrice]').dataset.id)}
   if(e.key==='Enter'&&e.target.matches('tr.click'))A.open(e.target.dataset.id);
+  if(e.key==='Enter'&&e.target.id==='fLp')e.preventDefault();
   if(e.key==='Enter'&&e.target.id==='pgGo'){e.preventDefault();A.pgGo()}
 });
 document.addEventListener('change',e=>{
   const t=e.target;
   if(t.name&&/^c\d$/.test(t.name)){draft.crit[+t.name.slice(1)]=t.value;$('#formErr').textContent='';renderIssues()}
   else if(t.name&&/^e\d$/.test(t.name))t.closest('.crit-row').classList.toggle('no',t.value==='No');
+  else if(t.id==='fLpOn'){draft.lpOn=t.checked;const box=$('#fLp');box.hidden=!t.checked;$('#formErr').textContent='';if(t.checked)box.focus()}
   else if(t.name==='fAud'){draft.aud=[...document.querySelectorAll('input[name=fAud]:checked')].map(x=>x.value);$('#formErr').textContent=''}
   else if(t.name==='loginUser')$('#loginErr').textContent='';
   else if(t.id==='statusF'){filter=t.value||'all';refreshRows()}
@@ -1284,6 +1308,7 @@ document.addEventListener('input',e=>{
   if(t.id==='fPrice'||t.id==='priceIn'){const v=t.value.replace(/[^\d.-]|(?!^)-/g,'').replace(/(\..*)\./g,'$1').replace(/(\.\d{2})\d+/,'$1');if(v!==t.value)t.value=v}
   if(t.id?.startsWith('iDesc'))draft.issues[+t.dataset.i].desc=t.value;
   else if(t.id==='fPrice'){draft.price=t.value;$('#formErr').textContent=''}
+  else if(t.id==='fLp'){draft.lp=t.value;$('#formErr').textContent=''}
   // only refresh the table body so the search box keeps focus, scroll and IME composition
   else if(t.id==='search'){search=t.value;page=1;$('#courseRows').innerHTML=courseRows();$('#pager').innerHTML=pagerHtml()}
   else if(t.id==='histQ'){histQ=t.value;$('#histRows').innerHTML=histRows()}

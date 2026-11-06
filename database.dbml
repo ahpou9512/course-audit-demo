@@ -59,6 +59,7 @@ Table Courses {
   Name varchar [not null]
   Type varchar [note: 'Learning Plan / ILT / On-Demand']
   DoceboPrice decimal(10,2) [note: 'in USD; null = not filled in yet']
+  LearningPlanCode varchar [note: 'the learning plan this course is part of; null = none']
   Health CourseHealth [not null, default: 'Pending Audit']
   AuditStatus AuditStatus [not null, default: 'Pending']
   CurrentAuditId int [ref: > Audits.Id, note: 'the audit of the current round']
@@ -97,6 +98,7 @@ Table Audits {
   IsReverification bool [not null, default: false]
   PriceSnapshot decimal(10,2) [note: 'pricing at the time of this audit']
   AudienceSnapshot varchar
+  LearningPlanSnapshot varchar
   Note varchar
 
   indexes {
