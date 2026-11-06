@@ -47,6 +47,9 @@ const auditLate=c=>stage(c)==='audit'&&Date.now()-pendingSince(c)>AUDIT_DAYS*DAY
 function auditFlag(c){if(stage(c)!=='audit')return '';const d=daysSince(pendingSince(c));
   if(auditLate(c))return `<span class="aud-sla late">${d}d not audited</span>`;
   return `<span class="aud-sla">${AUDIT_DAYS-d>0?`${AUDIT_DAYS-d}d left to audit`:'Last day to audit'}</span>`}
+// a Healthy course whose latest audit had tickets cancelled instead of fixed says so, until the next audit
+function cancelFlag(c){if(stage(c)!=='healthy')return '';const last=S.audits.filter(a=>a.courseId===c.id&&a.note!==REVERIFY).sort((a,b)=>b.date-a.date)[0];
+  const n=last?S.tickets.filter(t=>t.auditId===last.id&&t.closedAs==='Cancelled').length:0;return n?`<span class="aud-sla cancelled">${n} ticket${n>1?'s':''} cancelled</span>`:''}
 // fix date tracking: how often it moved and whether it was missed
 const movesOf=t=>S.logs.filter(l=>l.ticketId===t.id&&l.action==='Fix date changed').length;
 const etaMissed=t=>t.fixDate&&WORKING.includes(t.status)?Math.max(0,daysSince(t.fixDate)):0;
@@ -262,7 +265,7 @@ function courseRows(){
   const pageList=list.slice((page-1)*PAGE,page*PAGE);
   return `  ${list.length?pageList.map((c,i)=>{const [txt,me]=nextStep(c), shown=shownOf(c), hit=!tkF||shown.some(tkHit), fade=hit&&(catFilter||tkF||myF&&canWork());return `<tr class="click${hit?'':' dim'}${rowAnim?' row-in':''}${c.id===flashId||impFlash&&c.importId===impFlash?' flash':''}" style="--i:${Math.min(i,12)}" data-a="open" data-id="${c.id}" tabindex="0">
     <td><div class="cname"><span class="mono">${esc(c.code)}</span><b>${esc(c.name)}</b></div></td>
-    <td>${pill(healthLabel(c))}${auditFlag(c)}</td>
+    <td>${pill(healthLabel(c))}${auditFlag(c)}${cancelFlag(c)}</td>
     <td>${shown.length?`<div class="catlist">${shown.map(t=>{const done=t.status===CLOSED,dis=t.closedAs==='Cancelled'||t.closedAs==='Discontinued';
       return `<div class="ci${done?' closed':''}${fade&&!tkHit(t)?' other':''}" title="${t.id}">${done?`<span class="dot chk${dis?' dis':''}">✓</span>`:`<span class="dot ${tone(t.status)}"></span>`}<span class="cn">${esc(t.category)}</span>
       ${done?`<span class="cs ${dis?'':'ok'}">${dis?esc(t.closedAs):'Approved'}</span>`:`<span class="cs${isOverdue(t)||etaMissed(t)?' late':''}">${esc(shortStatus(t.status))}${tkFlag(t)?` · ${tkFlag(t)}`:''}</span>`}</div>`}).join('')}</div>`:'<span class="muted">—</span>'}</td>
@@ -291,7 +294,7 @@ function vCourse(){
   return `<button class="link back" data-a="go" data-id="courses">← All courses</button>
   <div class="panel cover${st==='disc'?' gone':''}"><div class="chead"><div style="display:flex;flex-direction:column;gap:6px">
       <span class="mono muted">${esc(c.code)} · ${esc(c.type)}${open.length?` · ${open.length} open issue${open.length>1?'s':''}`:''}</span><h2>${esc(c.name)}</h2>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${pill(healthLabel(c))}${st==='audit'&&c.health==='Healthy'?pill('Re-audit queued'):''}${auditFlag(c)}${discInfo(c)}</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${pill(healthLabel(c))}${st==='audit'&&c.health==='Healthy'?pill('Re-audit queued'):''}${auditFlag(c)}${cancelFlag(c)}${discInfo(c)}</div></div>
       <div class="chead-act">${isOwner()&&st!=='disc'?`<button class="btn" data-a="editCourse" data-id="${c.id}">Edit course</button>`:''}${btn}${(isAud()||isOwner())&&st!=='disc'?(!runs.length&&!ticketsOf(c.id).length?(c.lockedBy?'':`<button class="btn danger" data-a="delCourse" data-id="${c.id}">Delete course</button>`)
         :`<button class="btn danger" data-a="discCourse" data-id="${c.id}">Discontinue course</button>`):''}${isAud()&&st==='disc'?`<button class="btn" data-a="restoreCourse" data-id="${c.id}">Restore course</button>`:''}</div></div>
     ${stats}</div>
@@ -316,7 +319,8 @@ const discInfo=c=>{if(c.health!=='Discontinued')return '';const l=[...S.logs].re
 // Docebo pricing can be corrected in place by the auditor or SELM; every change is logged
 const canPrice=()=>isAud()||isSelm();
 // pricing is stored as a number (null = not filled in); '' → null, anything that isn't a non-negative number → NaN
-const toPrice=v=>{v=String(v??'').trim();if(!v)return null;const n=Number(v);return Number.isFinite(n)&&n>=0?Math.round(n*100)/100:NaN};
+const MAX_CODE=50, MAX_NAME=200, MAX_PRICE=99999999.99, MAX_PRICE_TEXT='99,999,999.99';
+const toPrice=v=>{v=String(v??'').trim();if(!v)return null;const n=Number(v);return Number.isFinite(n)&&n>=0&&n<=MAX_PRICE?Math.round(n*100)/100:NaN};
 const fmtPrice=p=>p==null?'—':Number(p).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 // a Healthy course has passed its audit, so its pricing and audience change only through a re-audit
 // pricing and audience come from the audit form; on the card they can only be corrected while tickets are being fixed
@@ -482,12 +486,10 @@ function auditForm(c){
   return `<form class="audit" id="auditForm" novalidate>
   <div class="audit-h"><h3>Audit #${S.audits.filter(a=>a.courseId===c.id).length+1}</h3><div class="audit-h-act"><label class="lp-tick"><input type="checkbox" id="fLpOn"${draft.lpOn?' checked':''}> Part of learning plan</label><input type="text" id="fLp" class="lp-code" placeholder="Course codes, separated by commas" aria-label="Learning plan course codes, separated by commas" autocomplete="off" value="${esc(draft.lp)}"${draft.lpOn?'':' hidden'}><button type="button" class="btn sm" data-a="cancelAudit" data-id="${c.id}">Cancel audit</button></div></div>
   <div class="audit-b">
-    ${d.re?`<div class="info-fields locked"><div class="field"><span>Docebo pricing</span><b>${fmtPrice(c.price)}</b></div>
-      <div class="field"><span>Catalog audience</span><b>${esc(c.audience||'—')}</b></div></div>`
-    :`<div class="info-fields">
+    <div class="info-fields">
       <label class="field"><span>Docebo pricing</span><input type="text" id="fPrice" inputmode="decimal" autocomplete="off" value="${esc(d.price)}"></label>
       <fieldset class="aud"><legend>Catalog audience</legend><div class="aud-opts">${AUDIENCES.map(a=>`<label class="aud-opt"><input type="checkbox" name="fAud" value="${a}"${d.aud.includes(a)?' checked':''}> ${a}</label>`).join('')}</div></fieldset>
-    </div>`}
+    </div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="sec-label">Criteria <span class="auto-yes" id="autoYes"></span></span><button type="button" class="btn sm" data-a="markAllYes">All Yes</button></div>
     <div class="crit">${CRITERIA.map((l,i)=>`<div class="crit-row${d.crit[i]==='No'?' no':''}" id="cr${i}"><span>${l}</span>
       <div class="seg" role="radiogroup" aria-label="${l}">${answers(i).map(v=>`<label><input type="radio" name="c${i}" value="${v}"${d.crit[i]===v?' checked':''}><span class="${v==='Yes'?'y':v==='No'?'n':'na'}">${v}</span></label>`).join('')}</div></div>`).join('')}</div>
@@ -514,14 +516,16 @@ function submitAudit(){
   const left=draft.crit.filter(v=>!v).length;
   if(left&&!draft.crit.includes('No'))return err(`Answer all criteria (${left} left), or mark the failed ones No.`);
   const price=toPrice(draft.price);
-  if(Number.isNaN(price))return err('Docebo pricing must be a number of 0 or more.');
+  if(Number.isNaN(price))return err(`Docebo pricing must be a number from 0 to ${MAX_PRICE_TEXT}.`);
   // several codes are separated by commas; repeats count once, whatever their case
   const plans=(draft.lpOn?String(draft.lp).split(/[,;\n]+/):[]).map(cleanCode).filter(Boolean).filter((p,i,l)=>l.findIndex(x=>codeKey(x)===codeKey(p))===i),learningPlan=plans.join(', ');
   const planSet=v=>String(v||'').split(', ').filter(Boolean).map(codeKey).sort().join();
+  if(plans.some(p=>p.length>MAX_CODE)){$('#fLp')?.focus();return err(`A learning plan course code can't be longer than ${MAX_CODE} characters.`)}
   if(draft.lpOn&&!plans.length){$('#fLp')?.focus();return err('Enter at least one learning plan course code.')}
   if(plans.some(p=>codeKey(p)===codeKey(c.code))){$('#fLp')?.focus();return err(`${c.code} is this course's own code, so it can't be its learning plan.`)}
   // the form starts with the last answers, so an unchanged re-audit asks once before it counts as checked today
-  if(draft.re&&!draft.same&&!draft.crit.includes('No')&&draft.base&&draft.crit.join()===draft.base.join()&&planSet(learningPlan)===planSet(c.learningPlan))
+  const audSet=v=>audList(v).map(impKey).sort().join();
+  if(draft.re&&!draft.same&&!draft.crit.includes('No')&&draft.base&&draft.crit.join()===draft.base.join()&&planSet(learningPlan)===planSet(c.learningPlan)&&price===(c.price??null)&&audSet(draft.aud.join(','))===audSet(c.audience))
     return openModal(`<div class="ov-h"><h3>Confirm no changes?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
       <div class="ov-b"><p style="margin:0">All answers for <b>${esc(c.code)}</b> are the same as the last audit. This records a passed audit dated today, and Last audited updates.</p></div>
       <div class="ov-f"><button class="btn" data-a="close">Back to form</button><button class="btn okb" data-a="confirmSame">Yes, submit</button></div>`);
@@ -608,7 +612,8 @@ function vDash(){
   const catCounts=CATS.map(c=>[c,open.filter(t=>t.category===c).length]).filter(x=>x[1]);
   const maxC=Math.max(1,...catCounts.map(x=>x[1]));
   const etaT=S.tickets.filter(t=>WORKING.includes(t.status));
-  const buckets={};etaT.forEach(t=>{const k=week(t.fixDate);(buckets[k]=buckets[k]||[]).push(t)});
+  const thisYear=new Date().getFullYear(),weekLabel=d=>d&&new Date(d).getFullYear()!==thisYear?`${week(d)} ${new Date(d).getFullYear()}`:week(d);
+  const buckets={};etaT.forEach(t=>{const k=weekLabel(t.fixDate);(buckets[k]=buckets[k]||[]).push(t)});
   const bKeys=Object.keys(buckets).sort((a,b)=>a==='TBD'?1:b==='TBD'?-1:Math.min(...buckets[a].map(t=>t.fixDate))-Math.min(...buckets[b].map(t=>t.fixDate)));
   const maxB=Math.max(1,...bKeys.map(k=>buckets[k].length));
   // every card opens the Courses page: course cards filter by status, ticket cards bring those tickets' courses to the top
@@ -711,7 +716,12 @@ function closeCycle(c){
     log({courseId:c.id,action:'Course discontinued',detail:'Archived and removed from active queues'});
     return 'Course discontinued';
   }
-  c.health='Healthy';c.auditorStatus='Completed';c.auditCount++;
+  c.health='Healthy';c.auditorStatus='Completed';
+  // a cancelled ticket was never fixed, so the answers stay as they were and no passed audit is recorded
+  const dropped=cyc.filter(t=>t.closedAs==='Cancelled').length;
+  if(dropped){log({courseId:c.id,action:'Closed with cancelled tickets',detail:`Course Healthy · ${dropped} ticket(s) cancelled, answers kept`});
+    return `Course is Healthy · ${dropped} ticket${dropped>1?'s':''} cancelled, answers kept`}
+  c.auditCount++;
   // Last audited stays on the last full audit: this only confirms the fixes, it doesn't check all 8 criteria again
   // every issue is fixed, so the failed criteria become Yes; N/A answers stay N/A
   const prev=S.audits.find(a=>a.id===c.cycleAuditId)?.checklist;
@@ -827,7 +837,9 @@ function checkImport(kind,rows){
     const code=cleanCode(get(first,'Course Code')),name=impText(get(first,'Course Name')),type=impType(get(first,'Type'));
     // one entry per problem: where it is, what the file says there, and why that stops the import
     const bad=(c,val,why,at=row)=>{failedCheck=true;skipped.push({row:at,code,name:impText(get(g.find(o=>o.row===at).r,'Course Name'))||name,col:c,val:impText(val),why})};
+    if(code.length>MAX_CODE)bad('Course Code',code,`Course code is longer than ${MAX_CODE} characters.`);
     if(!name)bad('Course Name','','Course name is missing.');
+    else if(name.length>MAX_NAME)bad('Course Name',name,`Course name is longer than ${MAX_NAME} characters.`);
     if(!type)bad('Type',get(first,'Type'),`Type must be ${COURSE_TYPES.join(', ')}.`);
     const taken=S.courses.find(c=>codeKey(c.code)===k);
     if(taken)bad('Course Code',code,`This course code is already in the system${taken.health==='Discontinued'?' as a discontinued course':''}: ${taken.name}.`);
@@ -837,7 +849,7 @@ function checkImport(kind,rows){
       const disc=impKey(get(first,'Course Status'));
       if(disc!=='active'&&disc!=='discontinued')bad('Course Status',get(first,'Course Status'),'Course status must be Active or Discontinued.');
       const isDisc=disc==='discontinued';
-      const price=toPrice(get(first,'Docebo Price'));if(Number.isNaN(price))bad('Docebo Price',get(first,'Docebo Price'),'Docebo price must be a number of 0 or more, with no commas or symbols.');
+      const price=toPrice(get(first,'Docebo Price'));if(Number.isNaN(price))bad('Docebo Price',get(first,'Docebo Price'),`Docebo price must be a number from 0 to ${MAX_PRICE_TEXT}, with no commas or symbols.`);
       // every price is in USD; an older file with another currency must not slip in as USD
       if('currency' in col)g.forEach(o=>{const cur=impText(get(o.r,'Currency'));if(cur&&cur.toUpperCase()!=='USD')bad('Currency',cur,'Prices must be in USD.',o.row)});
       const aud=audList(get(first,'Audience')).map(a=>({a,hit:AUDIENCES.find(o=>o.toLowerCase()===a.toLowerCase())}));
@@ -867,7 +879,7 @@ function checkImport(kind,rows){
         seenIssues.add(issueKey);issues.push({cat:cat||rawCat,desc})});
       if(!isDisc&&anyNo&&!issues.length){const nos=CRITERIA.filter((_,i)=>crit[i]==='No');bad('Issue','',`${nos.join(', ')} ${nos.length>1?'are':'is'} No, but Issue is blank.`)}
       if(!isDisc&&!anyNo&&issues.length)bad('Issue',issues[0].desc,'Issue is filled in, but no criterion is marked No.');
-      Object.assign(x,{disc:isDisc,price:Number.isNaN(price)?null:price,audience:aud.map(a=>a.hit).filter(Boolean).join(', '),crit:crit.map(v=>v||(isDisc?'N/A':'Yes')),auditor,date,note,issues,dupes,failed:anyNo&&!isDisc,anyNo})}
+      Object.assign(x,{disc:isDisc,price:Number.isNaN(price)?null:price,audience:[...new Set(aud.map(a=>a.hit).filter(Boolean))].join(', '),crit:crit.map(v=>v||(isDisc?'N/A':'Yes')),auditor,date,note,issues,dupes,failed:anyNo&&!isDisc,anyNo})}
     if(failedCheck)continue;
     const nameKey=normName(name);if(!x.warn)x.warn=names.get(nameKey)||'';if(!names.has(nameKey))names.set(nameKey,code);
     ready.push(x)}
@@ -1051,8 +1063,8 @@ const A={
     impRun(bid,kind,file,ready)},
   impDone(){closeOv()},
   addCourse(){openModal(`<form id="addForm" novalidate style="display:contents"><div class="ov-h"><h3>Add a course</h3><button type="button" class="x" data-a="close" aria-label="Close">×</button></div>
-    <div class="ov-b"><label class="field"><span class="req">Course code</span><input type="text" id="nCode" placeholder="e.g. ESSTGD04406"></label>
-    <label class="field"><span class="req">Course name</span><input type="text" id="nName"></label>
+    <div class="ov-b"><label class="field"><span class="req">Course code</span><input type="text" id="nCode" placeholder="e.g. ESSTGD04406" maxlength="${MAX_CODE}"></label>
+    <label class="field"><span class="req">Course name</span><input type="text" id="nName" maxlength="${MAX_NAME}"></label>
     <label class="field"><span>Type</span><select id="nType"><option>Learning Plan</option><option>ILT</option><option>On-Demand</option></select></label>
     <span class="err" id="nErr"></span></div>
     <div class="ov-f"><button type="button" class="btn" data-a="close">Cancel</button><button type="submit" class="btn primary">Add</button></div></form>`);$('#nCode').focus()},
@@ -1064,8 +1076,8 @@ const A={
     S.courses.push(c);log({courseId:c.id,action:'Course registered',detail:'Manual entry'});save();closeOv();render();toast(`${code} added`)},
   // the course owner keeps the code, name and type right; every change goes in the history
   editCourse(id){const c=course(id);openModal(`<form id="editForm" data-id="${id}" novalidate style="display:contents"><div class="ov-h"><h3>Edit ${esc(c.code)}</h3><button type="button" class="x" data-a="close" aria-label="Close">×</button></div>
-    <div class="ov-b"><label class="field"><span class="req">Course code</span><input type="text" id="eCode" value="${esc(c.code)}"></label>
-    <label class="field"><span class="req">Course name</span><input type="text" id="eName" value="${esc(c.name)}"></label>
+    <div class="ov-b"><label class="field"><span class="req">Course code</span><input type="text" id="eCode" maxlength="${MAX_CODE}" value="${esc(c.code)}"></label>
+    <label class="field"><span class="req">Course name</span><input type="text" id="eName" maxlength="${MAX_NAME}" value="${esc(c.name)}"></label>
     <label class="field"><span>Type</span><select id="eType">${['Learning Plan','ILT','On-Demand'].map(t=>`<option${t===c.type?' selected':''}>${t}</option>`).join('')}</select></label>
     <span class="err" id="eErr"></span></div>
     <div class="ov-f"><button type="button" class="btn" data-a="close">Cancel</button><button type="submit" class="btn primary">Save</button></div></form>`);$('#eCode').focus()},
@@ -1285,7 +1297,7 @@ const A={
     const i=$('#priceIn');i.focus();i.select()},
   cancelPrice(id){$('#priceBox').innerHTML=priceView(course(id))},
   savePrice(id){const c=course(id),v=toPrice($('#priceIn').value),old=c.price??null;
-    if(Number.isNaN(v)){$('#priceErr').textContent='Enter a number of 0 or more.';return}
+    if(Number.isNaN(v)){$('#priceErr').textContent=`Enter a number from 0 to ${MAX_PRICE_TEXT}.`;return}
     if(v!==old){c.price=v;log({courseId:id,auditId:c.cycleAuditId,action:'Pricing updated',detail:`${fmtPrice(old)} → ${fmtPrice(v)}`});save();refreshTrail(c);toast('Pricing updated')}
     A.cancelPrice(id)},
   editAud(id){const c=course(id),cur=audList(c.audience);

@@ -20,7 +20,7 @@
 | `10-date-formats.csv` | Existing | 挡下，2 个问题（文字日期只接受 `YYYY-MM-DD`） | 通过 |
 | `11-hidden-character-code.csv` | New | 挡下，2 个问题（隐藏字符和多余空格不能绕过重复检查） | 通过 |
 | `12-audit-owner-names.csv` | Existing | **应该检查名字；现在 3 行都能导入** | **问题 3** |
-| `13-price-audience.csv` | Existing | **应该挡下；现在 2 行都能导入** | **问题 5** |
+| `13-price-audience.csv` | Existing | 挡下，1 个问题（价格超过上限）；`Partner, partner` 算一个 Audience | 通过 |
 | `14-new-large-1000.csv` | New | 可以导入 1,000 门 | 通过 |
 | `15-old-template-with-currency.csv` | Existing | 挡下，1 个问题（旧模板里的 CNY）；USD 那行本身没问题 | 通过 |
 
@@ -47,8 +47,8 @@
 | 2 | 已修好 | 隐藏字符和多余空格可以绕过 Course Code 重复检查 | `DT-H1` 和后面带零宽字符的 `DT-H1` 算两门；`DT H1` 和 `DT  H1` 也算两门 | 比较前删除隐藏字符、合并空格 |
 | 3 | 中 | Audit Owner 不检查 | `Zed`、`rick`、SELM 的 `Gary` 都能导入。Team 页不算这些 audit，`rick` 的不算进 Rick | 待决定，见问题 B |
 | 4 | 已修好 | 导入后没有撤销 | Existing 导入的课程没有 Delete，要清掉只能 Clear all data（全部资料） | 已加整批撤销：Courses 页的 Undo import 和 Import history |
-| 5 | 中 | 没有上限和合理性检查 | 价格 `999999999999` 超过数据库 `decimal(10,2)`；`Partner, partner` 存成两个；日期 `1900-01-01` 也接受 | 加上限、币种清单，Audience 去重 |
-| 6 | 中 | Code 和 Name 没有长度限制 | 300 字的 Code、3,000 字的 Name 都能导入，可能撑破版面 | 和数据库长度一致 |
+| 5 | 大部分已修好 | 价格上限和 Audience 去重已修好；日期 `1900-01-01` 还接受 | | 日期要不要加下限，待决定 |
+| 6 | 已修好 | Code 和 Name 没有长度限制 | Code 最多 50 个字符，Name 最多 200 个字符 | |
 | 7 | 低 | 只读第一张 sheet，提示没有说明 | 第一张是 Summary 时，只提示缺少栏位 | 提示里写明读的是哪张 sheet |
 | 8 | 低 | CSV 不是 UTF-8 时，中文变乱码也能导入 | GBK 编码的中文名称变成 `����` | 发现乱码就挡下 |
 | 9 | 已修好 | 读大文件时关掉弹窗，读完会再弹出来 | 60,000 行的 CSV | 关掉就取消 |

@@ -55,10 +55,10 @@ Table Users {
 
 Table Courses {
   Id int [pk, increment]
-  Code varchar [not null, unique]
-  Name varchar [not null]
+  Code varchar(50) [not null, unique]
+  Name varchar(200) [not null]
   Type varchar [note: 'Learning Plan / ILT / On-Demand']
-  DoceboPrice decimal(10,2) [note: 'in USD; null = not filled in yet']
+  DoceboPrice decimal(10,2) [note: 'in USD, up to 99,999,999.99; null = not filled in yet']
   Health CourseHealth [not null, default: 'Pending Audit']
   AuditStatus AuditStatus [not null, default: 'Pending']
   CurrentAuditId int [ref: > Audits.Id, note: 'the audit of the current round']
@@ -164,7 +164,7 @@ Table ActivityLogs {
 
 Table CourseLearningPlans {
   CourseId int [ref: > Courses.Id]
-  LearningPlanCode varchar [note: 'a course can be part of several learning plans; the code need not be in Courses yet']
+  LearningPlanCode varchar(50) [note: 'a course can be part of several learning plans; the code need not be in Courses yet']
 
   indexes {
     (CourseId, LearningPlanCode) [pk]
