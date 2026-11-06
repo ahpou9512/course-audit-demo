@@ -59,7 +59,6 @@ Table Courses {
   Name varchar [not null]
   Type varchar [note: 'Learning Plan / ILT / On-Demand']
   DoceboPrice decimal(10,2) [note: 'in USD; null = not filled in yet']
-  LearningPlanCode varchar [note: 'the learning plan this course is part of; null = none']
   Health CourseHealth [not null, default: 'Pending Audit']
   AuditStatus AuditStatus [not null, default: 'Pending']
   CurrentAuditId int [ref: > Audits.Id, note: 'the audit of the current round']
@@ -160,6 +159,15 @@ Table ActivityLogs {
   Action varchar [not null, note: 'see the Action list in database.md']
   Detail varchar
   ImportBatchId int [ref: > ImportBatches.Id, note: 'written by an import; logs with null here mean someone worked on the course']
+}
+
+Table CourseLearningPlans {
+  CourseId int [ref: > Courses.Id]
+  LearningPlanCode varchar [note: 'a course can be part of several learning plans; the code need not be in Courses yet']
+
+  indexes {
+    (CourseId, LearningPlanCode) [pk]
+  }
 }
 
 Table ImportBatches {

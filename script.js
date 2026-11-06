@@ -40,12 +40,13 @@ const openOf=cid=>ticketsOf(cid).filter(t=>t.status!==CLOSED);
 // two 7-day clocks: raised -> escalated, then escalated -> fix date set
 const slaFrom=t=>t.status==='New'?t.slaStart||t.createdAt:(t.status==='Escalated'||t.status==='Retest Failed')&&!t.fixDate?t.escalatedAt:null;
 const isOverdue=t=>{const s=slaFrom(t);return !!s&&Date.now()-s>7*DAY};
-// a course waiting for audit also has 7 days, counted from when it was added or restored; older data may also say it was queued for re-audit
+// a course waiting for audit has 30 days, counted from when it was added or restored; older data may also say it was queued for re-audit
 const pendingSince=c=>Math.max(c.createdAt||0,...S.logs.filter(l=>l.courseId===c.id&&['Course registered','Course restored','Re-audit queued'].includes(l.action)).map(l=>l.ts));
-const auditLate=c=>stage(c)==='audit'&&Date.now()-pendingSince(c)>7*DAY;
+const AUDIT_DAYS=30;
+const auditLate=c=>stage(c)==='audit'&&Date.now()-pendingSince(c)>AUDIT_DAYS*DAY;
 function auditFlag(c){if(stage(c)!=='audit')return '';const d=daysSince(pendingSince(c));
   if(auditLate(c))return `<span class="aud-sla late">${d}d not audited</span>`;
-  return `<span class="aud-sla">${7-d>0?`${7-d}d left to audit`:'Last day to audit'}</span>`}
+  return `<span class="aud-sla">${AUDIT_DAYS-d>0?`${AUDIT_DAYS-d}d left to audit`:'Last day to audit'}</span>`}
 // fix date tracking: how often it moved and whether it was missed
 const movesOf=t=>S.logs.filter(l=>l.ticketId===t.id&&l.action==='Fix date changed').length;
 const etaMissed=t=>t.fixDate&&WORKING.includes(t.status)?Math.max(0,daysSince(t.fixDate)):0;
@@ -171,8 +172,8 @@ function vCourses(){
     ${canWork()?`<button class="fchip mine" data-a="toggleMine" aria-pressed="${myF}">My tickets <b>${myN}</b></button>`:''}</div>
     </div>
   <div class="tk-legend" role="group" aria-label="Highlight tickets"><span class="lbl">Highlight tickets</span>${TK_OPTS.map(([v,l])=>`<button class="lchip" data-a="tkHl" data-id="${v}" aria-pressed="${tkF===v}">${v==='closed'?'<span class="dot chk">✓</span>':`<span class="dot ${tone(v==='verify'?PV_RES:v)}"></span>`}${l} <b>${tkCount(v)}</b></button>`).join('')}</div>
-  <div class="tbl-wrap"><table class="courses-tbl"><colgroup><col style="width:22%"><col style="width:20%"><col style="width:30%"><col style="width:13%"><col style="width:15%"></colgroup>
-    <thead><tr><th>Course</th><th>Status</th><th>Issue categories</th><th>Last audited</th><th>Next step</th></tr>
+  <div class="tbl-wrap"><table class="courses-tbl"><colgroup><col style="width:22%"><col style="width:20%"><col style="width:28%"><col style="width:15%"><col style="width:15%"></colgroup>
+    <thead><tr>${SORTS.map(([k,l])=>`<th data-sort="${k}"${sortK===k?` aria-sort="${sortD>0?'ascending':'descending'}"`:''}><button type="button" class="th-sort" data-a="sortBy" data-id="${k}">${l}<i aria-hidden="true">${sortMark(k)}</i></button></th>`).join('')}</tr>
     <tr class="frow"><th><input type="search" id="search" placeholder="Search code or name" value="${esc(search)}" aria-label="Search courses"></th>
     <th>${fsel('statusF',filter==='all'?'':filter,'All statuses',STAGES.slice(1),'Filter by status')}</th>
     <th>${fsel('catFilter',catFilter,'All categories',CATS.map(x=>[x,x]),'Filter by issue category')}</th>
@@ -190,16 +191,29 @@ const tkKeep=t=>(!catFilter||t.category===catFilter)&&(!myF||!canWork()||t.escal
 const tkHit=t=>tkKeep(t)&&(!tkF||tkMatch(t));
 // while the cycle is still open, tickets already approved stay listed with a check mark
 const shownOf=c=>openOf(c.id).length?ticketsOf(c.id).filter(t=>t.status!==CLOSED||t.auditId===c.cycleAuditId):[];
-const AUDITED_OPTS=[['never','Never audited'],['7','Last 7 days'],['30','Last 30 days'],['old','Over 30 days ago']];
+// a Healthy course that hasn't been audited for 180 days is due for another look
+const REAUDIT_DAYS=180, auditOld=c=>stage(c)==='healthy'&&!!c.lastAudited&&daysSince(c.lastAudited)>REAUDIT_DAYS;
+const AUDITED_OPTS=[['never','Never audited'],['7','Last 7 days'],['30','Last 30 days'],['old','Over 30 days ago'],['180','Over 180 days ago']];
 const fsel=(id,cur,all,opts,label)=>`<select id="${id}" class="${cur?'on':''}" aria-label="${label}"><option value="">${all}</option>${opts.map(([v,l])=>`<option value="${esc(v)}"${cur===v?' selected':''}>${esc(l)}</option>`).join('')}</select>`;
 function auditedOk(c){
   if(!auditedF)return true;
   if(auditedF==='never')return !c.lastAudited;
   if(!c.lastAudited)return false;
   const d=daysSince(c.lastAudited);
-  return auditedF==='old'?d>30:d<=+auditedF;
+  return auditedF==='old'?d>30:auditedF==='180'?d>REAUDIT_DAYS:d<=+auditedF;
 }
 // filtering only swaps the table rows, so the page itself never redraws
+// clicking a column title sorts by it: ascending, then descending, then back to the usual order
+const SORTS=[['code','Course'],['status','Status'],['issues','Issue categories'],['audited','Last audited'],['next','Next step']];
+let sortK='',sortD=1;
+const sortMark=k=>sortK!==k?'↕':sortD>0?'▲':'▼';
+const textCmp=(a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true,sensitivity:'base'});
+function sortCmp(a,b){
+  // a course never audited stays at the end either way
+  if(sortK==='audited'&&!a.lastAudited!==!b.lastAudited)return a.lastAudited?-1:1;
+  const r=sortK==='code'?textCmp(a.code,b.code):sortK==='status'?textCmp(healthLabel(a),healthLabel(b))
+    :sortK==='issues'?openOf(a.id).length-openOf(b.id).length:sortK==='audited'?(a.lastAudited||0)-(b.lastAudited||0):textCmp(nextStep(a)[0],nextStep(b)[0]);
+  return sortD*r||textCmp(a.code,b.code)}
 function refreshRows(keepPage){
   if(!keepPage)page=1; // any filter change starts again from the first page
   document.querySelectorAll('.fchip[data-a=filter]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.id===filter));
@@ -242,7 +256,7 @@ function courseRows(){
   const q=search.trim().toLowerCase();
   const list=S.courses.filter(c=>(filter==='all'?stage(c)!=='disc':stage(c)===filter)&&(!q||(c.code+' '+c.name).toLowerCase().includes(q))
       &&auditedOk(c)&&(!(catFilter||myF&&canWork())||shownOf(c).some(tkKeep)))
-    .sort((a,b)=>(tkF?shownOf(b).some(tkHit)-shownOf(a).some(tkHit):0)||(nextStep(b)[1]-nextStep(a)[1])||b.createdAt-a.createdAt);
+    .sort(sortK?sortCmp:(a,b)=>(tkF?shownOf(b).some(tkHit)-shownOf(a).some(tkHit):0)||(nextStep(b)[1]-nextStep(a)[1])||b.createdAt-a.createdAt);
   // one page of PAGE rows at a time
   rowTotal=list.length;page=Math.min(page,Math.max(1,Math.ceil(list.length/PAGE)));
   const pageList=list.slice((page-1)*PAGE,page*PAGE);
@@ -252,8 +266,8 @@ function courseRows(){
     <td>${shown.length?`<div class="catlist">${shown.map(t=>{const done=t.status===CLOSED,dis=t.closedAs==='Cancelled'||t.closedAs==='Discontinued';
       return `<div class="ci${done?' closed':''}${fade&&!tkHit(t)?' other':''}" title="${t.id}">${done?`<span class="dot chk${dis?' dis':''}">✓</span>`:`<span class="dot ${tone(t.status)}"></span>`}<span class="cn">${esc(t.category)}</span>
       ${done?`<span class="cs ${dis?'':'ok'}">${dis?esc(t.closedAs):'Approved'}</span>`:`<span class="cs${isOverdue(t)||etaMissed(t)?' late':''}">${esc(shortStatus(t.status))}${tkFlag(t)?` · ${tkFlag(t)}`:''}</span>`}</div>`}).join('')}</div>`:'<span class="muted">—</span>'}</td>
-    <td class="mono nowrap">${fmtD(c.lastAudited)}</td>
-    <td><span class="next${me?' me':''}">${esc(txt)}</span></td></tr>`}).join('')
+    <td class="mono nowrap${auditOld(c)?' audit-old':''}">${fmtD(c.lastAudited)}</td>
+    <td><span class="next${me?' me':''}${auditOld(c)?' old':''}">${esc(txt)}</span></td></tr>`}).join('')
   :`<tr><td colspan="5" class="empty">${S.courses.length?'No courses match.':'No courses yet. Add the first one with “+ Add course”.'}</td></tr>`}`;
 }
 
@@ -272,8 +286,8 @@ function vCourse(){
   else if(st==='audit'&&isAud()&&!c.lockedBy)btn=`<button class="btn primary" data-a="startAudit" data-id="${c.id}">Start audit</button>`;
   else if(st==='healthy'&&!c.lockedBy&&isAud())btn=`<button class="btn" data-a="reaudit" data-id="${c.id}">Re-audit</button>`;
   else if(st==='audit'&&!isAud())btn=`<span class="muted small">Waiting for an auditor</span>`;
-  const stats=`<div class="stats"><span>Audits <b>${runs.length}</b></span><span>Last audited <b>${fmtD(c.lastAudited)}</b>${c.lastAudited?` (${daysSince(c.lastAudited)}d ago)`:''}</span>
-      <span>By <b>${esc(c.lastAuditor||'—')}</b></span><span id="priceBox">${priceView(c)}</span><span id="audBox">${audView(c)}</span>${c.learningPlan?`<span>Learning plan <b class="mono">${esc(c.learningPlan)}</b></span>`:''}</div>`;
+  const stats=`<div class="stats"><span>Audits <b>${runs.length}</b></span><span${auditOld(c)?' class="audit-old"':''}>Last audited <b>${fmtD(c.lastAudited)}</b>${c.lastAudited?` (${daysSince(c.lastAudited)}d ago)`:''}</span>
+      <span>By <b>${esc(c.lastAuditor||'—')}</b></span><span id="priceBox">${priceView(c)}</span><span id="audBox">${audView(c)}</span>${c.learningPlan?`<span>${c.learningPlan.includes(',')?'Learning plans':'Learning plan'} <b class="mono">${esc(c.learningPlan)}</b></span>`:''}</div>`;
   return `<button class="link back" data-a="go" data-id="courses">← All courses</button>
   <div class="panel cover${st==='disc'?' gone':''}"><div class="chead"><div style="display:flex;flex-direction:column;gap:6px">
       <span class="mono muted">${esc(c.code)} · ${esc(c.type)}${open.length?` · ${open.length} open issue${open.length>1?'s':''}`:''}</span><h2>${esc(c.name)}</h2>
@@ -335,7 +349,7 @@ const critChips=a=>{const no=CRITERIA.filter((_,j)=>a.checklist[j]==='No'),yes=a
 // pricing and audience as they were at that audit; a value that differs from the audit before it shows what it was
 const auditInfo=(a,prev)=>{const v=(k,f)=>a[k]===undefined?'—':f(a[k]),moved=k=>prev&&a[k]!==undefined&&prev[k]!==undefined&&prev[k]!==a[k];
   const part=(l,k,f)=>`<span>${l} ${moved(k)?`<s>${esc(f(prev[k]))}</s> → <b class="chg">${esc(v(k,f))}</b>`:`<b>${esc(v(k,f))}</b>`}</span>`;
-  return `<div class="ainfo">${part('Pricing','price',fmtPrice)}${part('Audience','audience',x=>x||'—')}${a.learningPlan?`<span>Learning plan <b>${esc(a.learningPlan)}</b></span>`:''}</div>`};
+  return `<div class="ainfo">${part('Pricing','price',fmtPrice)}${part('Audience','audience',x=>x||'—')}${a.learningPlan?`<span>${a.learningPlan.includes(',')?'Learning plans':'Learning plan'} <b>${esc(a.learningPlan)}</b></span>`:''}</div>`};
 // the auditor can correct the criteria of the current audit while its tickets are still open
 function critEditor(a){
   return `<div class="crit-edit"><div class="crit">${CRITERIA.map((l,i)=>`<div class="crit-row${a.checklist[i]==='No'?' no':''}"><span>${l}</span>
@@ -466,7 +480,7 @@ function records(t){
 function auditForm(c){
   const d=draft;
   return `<form class="audit" id="auditForm" novalidate>
-  <div class="audit-h"><h3>Audit #${S.audits.filter(a=>a.courseId===c.id).length+1}</h3><div class="audit-h-act"><label class="lp-tick"><input type="checkbox" id="fLpOn"${draft.lpOn?' checked':''}> Part of learning plan</label><input type="text" id="fLp" class="lp-code" placeholder="Course code" aria-label="Learning plan course code" autocomplete="off" value="${esc(draft.lp)}"${draft.lpOn?'':' hidden'}><button type="button" class="btn sm" data-a="cancelAudit" data-id="${c.id}">Cancel audit</button></div></div>
+  <div class="audit-h"><h3>Audit #${S.audits.filter(a=>a.courseId===c.id).length+1}</h3><div class="audit-h-act"><label class="lp-tick"><input type="checkbox" id="fLpOn"${draft.lpOn?' checked':''}> Part of learning plan</label><input type="text" id="fLp" class="lp-code" placeholder="Course codes, separated by commas" aria-label="Learning plan course codes, separated by commas" autocomplete="off" value="${esc(draft.lp)}"${draft.lpOn?'':' hidden'}><button type="button" class="btn sm" data-a="cancelAudit" data-id="${c.id}">Cancel audit</button></div></div>
   <div class="audit-b">
     ${d.re?`<div class="info-fields locked"><div class="field"><span>Docebo pricing</span><b>${fmtPrice(c.price)}</b></div>
       <div class="field"><span>Catalog audience</span><b>${esc(c.audience||'—')}</b></div></div>`
@@ -501,12 +515,16 @@ function submitAudit(){
   if(left&&!draft.crit.includes('No'))return err(`Answer all criteria (${left} left), or mark the failed ones No.`);
   const price=toPrice(draft.price);
   if(Number.isNaN(price))return err('Docebo pricing must be a number of 0 or more.');
-  const learningPlan=draft.lpOn?cleanCode(draft.lp):'';
-  if(draft.lpOn&&!learningPlan){$('#fLp')?.focus();return err('Enter the course code of the learning plan.')}
-  if(learningPlan&&codeKey(learningPlan)===codeKey(c.code)){$('#fLp')?.focus();return err("The learning plan code can't be this course's own code.")}
-  // a re-audit is saved when it finds a No or changes an answer (e.g. Yes → N/A) or the learning plan; otherwise Cancel audit keeps it as it was
-  if(draft.re&&!draft.crit.includes('No')&&draft.base&&draft.crit.join()===draft.base.join()&&learningPlan===(c.learningPlan||''))
-    return err('Nothing changed. Mark a criterion No or N/A, or use Cancel audit to keep it Healthy.');
+  // several codes are separated by commas; repeats count once, whatever their case
+  const plans=(draft.lpOn?String(draft.lp).split(/[,;\n]+/):[]).map(cleanCode).filter(Boolean).filter((p,i,l)=>l.findIndex(x=>codeKey(x)===codeKey(p))===i),learningPlan=plans.join(', ');
+  const planSet=v=>String(v||'').split(', ').filter(Boolean).map(codeKey).sort().join();
+  if(draft.lpOn&&!plans.length){$('#fLp')?.focus();return err('Enter at least one learning plan course code.')}
+  if(plans.some(p=>codeKey(p)===codeKey(c.code))){$('#fLp')?.focus();return err(`${c.code} is this course's own code, so it can't be its learning plan.`)}
+  // the form starts with the last answers, so an unchanged re-audit asks once before it counts as checked today
+  if(draft.re&&!draft.same&&!draft.crit.includes('No')&&draft.base&&draft.crit.join()===draft.base.join()&&planSet(learningPlan)===planSet(c.learningPlan))
+    return openModal(`<div class="ov-h"><h3>Confirm no changes?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+      <div class="ov-b"><p style="margin:0">All answers for <b>${esc(c.code)}</b> are the same as the last audit. This records a passed audit dated today, and Last audited updates.</p></div>
+      <div class="ov-f"><button class="btn" data-a="close">Back to form</button><button class="btn okb" data-a="confirmSame">Yes, submit</button></div>`);
   const audience=draft.aud.join(', '), info={price,audience,learningPlan}, ts=Date.now();
   const started=c.lockedAt?` · started ${fmtDT(c.lockedAt)}`:'';
   if(draft.crit.includes('No')){
@@ -553,13 +571,11 @@ function critPanel(){
 }
 // long dashboard lists show the first few; the rest open on request
 const LIST_MAX=5, listOpen=new Set();
-// a small "i" beside a title: the explanation shows on hover, on keyboard focus and on tap
-const infoTip=text=>`<button type="button" class="info-tip" aria-label="${esc(text)}"><span class="info-i" aria-hidden="true">i</span><span class="info-pop" aria-hidden="true">${esc(text)}</span></button>`;
 // everything past its deadline, in one list: the longest overdue first
 const ALERT_KINDS=[['audit','Not audited'],['esc','Not escalated'],['fix','No fix date'],['eta','Fix date missed']];
 let alertF='all';
 function alertRows(){const rows=[];
-  S.courses.filter(auditLate).forEach(c=>rows.push({kind:'audit',c,t:null,owner:'Auditors',late:Math.max(1,daysSince(pendingSince(c))-7)}));
+  S.courses.filter(auditLate).forEach(c=>rows.push({kind:'audit',c,t:null,owner:'Auditors',late:Math.max(1,daysSince(pendingSince(c))-AUDIT_DAYS)}));
   S.tickets.filter(t=>t.status!==CLOSED).forEach(t=>{const c=course(t.courseId);
     if(isOverdue(t))rows.push(t.status==='New'?{kind:'esc',c,t,owner:'Not assigned',late:Math.max(1,daysSince(slaFrom(t))-7)}:{kind:'fix',c,t,owner:t.escalatedBy||'—',late:Math.max(1,daysSince(slaFrom(t))-7)});
     else if(etaMissed(t))rows.push({kind:'eta',c,t,owner:t.escalatedBy||'—',late:etaMissed(t)})});
@@ -600,9 +616,9 @@ function vDash(){
   const tm=(v,l,t,k)=>`<button class="metric" data-a="dashGo" data-id="t:${k}" style="--tone:var(${t})"><b>${v}</b><span>${l}</span></button>`;
   const from=rptFrom??dayStart(Date.now()-6*DAY), to=rptTo??dayStart(Date.now());
   const inR=S.logs.filter(l=>l.ts>=from&&l.ts<to+DAY), cnt=a=>inR.filter(l=>l.action===a).length;
-  return `<div class="head"><h2>Dashboard</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-a="samples">${S.courses.some(c=>c.sample)?'Remove 7-day samples':'Add 7-day samples'}</button><button class="btn sm" data-a="reset">Clear all data</button></div></div>
+  return `<div class="head"><h2>Dashboard</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-a="samples">${S.courses.some(c=>c.sample)?'Remove samples':'Add samples'}</button><button class="btn sm" data-a="reset">Clear all data</button></div></div>
   <span class="sec-label">Courses</span>
-  <div class="metric hero" style="--tone:var(--accent)"><button class="hero-link" data-a="dashGo" data-id="c:all"><b>${cs.all}</b><span>Active courses</span></button><small class="hero-sla${lateAud.length?' bad':''}">${lateAud.length} not audited in 7d</small>${foldBtn('courses')}</div>
+  <div class="metric hero" style="--tone:var(--accent)"><button class="hero-link" data-a="dashGo" data-id="c:all"><b>${cs.all}</b><span>Active courses</span></button><small class="hero-sla${lateAud.length?' bad':''}">${lateAud.length} not audited in ${AUDIT_DAYS}d</small>${foldBtn('courses')}</div>
   <div class="fold-box${fold.courses?' shut':''}" id="fold-courses"><div class="metrics">${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to revalidate','--pv','verify')}${m(cs.audit,'Pending audit','--warn','audit')}</div></div>
   ${alertPanel()}
   <span class="sec-label">Tickets</span>
@@ -610,7 +626,7 @@ function vDash(){
   <div class="fold-box${fold.tickets?' shut':''}" id="fold-tickets"><div class="metrics">${tm(S.tickets.filter(t=>t.status==='New').length,'New','--warn','New')}${tm(S.tickets.filter(t=>t.status==='Retest Failed').length,'Retest Failed','--bad','Retest Failed')}${tm(S.tickets.filter(t=>t.status==='Escalated').length,'Escalated','--info','Escalated')}${tm(S.tickets.filter(t=>t.status==='In Progress').length,'In Progress','--accent','In Progress')}${tm(S.tickets.filter(t=>t.status===PV_RES||t.status===PV_DIS).length,'Waiting for verification','--pv','verify')}</div></div>
   <div class="grid2">
     <div class="panel"><h3>Open tickets by category</h3><div class="bars">${catCounts.length?catCounts.map(([c,n])=>`<div class="bar"><span>${esc(c)}</span><div class="track"><div class="fill" style="width:${n/maxC*100}%"></div></div><span class="v">${n}</span></div>`).join(''):'<span class="muted">No open tickets</span>'}</div></div>
-    <div class="panel"><h3 class="has-tip">Fix ETA by week${infoTip('Tickets being worked on, grouped by tentative fix date. TBD means no date is set yet.')}</h3><div class="bars">${bKeys.length?bKeys.map(k=>`<div class="bar"><span class="mono">${k}</span><div class="track"><div class="fill" style="width:${buckets[k].length/maxB*100}%;${k==='TBD'?'background:var(--warn)':''}"></div></div><span class="v">${buckets[k].length}</span></div>`).join(''):'<span class="muted">Nothing scheduled</span>'}</div></div>
+    <div class="panel"><h3>Fix ETA by week</h3><div class="bars">${bKeys.length?bKeys.map(k=>`<div class="bar"><span class="mono">${k}</span><div class="track"><div class="fill" style="width:${buckets[k].length/maxB*100}%;${k==='TBD'?'background:var(--warn)':''}"></div></div><span class="v">${buckets[k].length}</span></div>`).join(''):'<span class="muted">Nothing scheduled</span>'}</div></div>
   </div>
   ${movesPanel(open)}
   ${critPanel()}
@@ -717,10 +733,15 @@ function addSamples(){const now=Date.now(),ago=d=>now-d*DAY,price=299;
       const at=(d,actor,action,detail)=>log({ts:ago(d),actor,courseId:c.id,ticketId:t.id,action,detail});
       if(x.esc)at(x.esc,x.by,'Escalated','');
       (x.moves||[]).forEach(m=>{at(m.d,x.by,'Fix date changed',`${week(ago(m.from))} → ${week(ago(m.to))} (${fmtD(ago(m.to))})`);at(m.d,x.by,'Note added',m.note);t.notes.push({ts:ago(m.d),by:x.by,text:m.note})})})};
-  // waiting for their first audit: one past the 7 days, one still inside them
-  [['SAMPLE-104','Sample: not audited yet',10],['SAMPLE-105','Sample: added recently',2]].forEach(([code,name,d])=>{
+  // waiting for their first audit: one past the deadline, one still inside it
+  [['SAMPLE-104','Sample: not audited yet',35],['SAMPLE-105','Sample: added recently',2]].forEach(([code,name,d])=>{
     const c={id:'C'+S.seq.c++,sample:true,code,name,type:'ILT',price:null,audience:'',health:'Pending Audit',auditorStatus:'Pending',auditCount:0,lastAudited:null,lastAuditor:null,lockedBy:null,lockedAt:null,cycleAuditId:null,createdAt:ago(d)};
     S.courses.push(c);log({ts:ago(d),actor:'Rick',courseId:c.id,action:'Course registered',detail:'Manual entry'})});
+  // Healthy courses for the Over 180 days ago filter: two past it, one still inside it
+  [['SAMPLE-106','Sample: audited 200 days ago',200],['SAMPLE-107','Sample: audited 300 days ago',300],['SAMPLE-108','Sample: audited 170 days ago',170]].forEach(([code,name,d])=>{
+    const c={id:'C'+S.seq.c++,sample:true,code,name,type:'ILT',price,audience:'Partner',health:'Healthy',auditorStatus:'Completed',auditCount:1,lastAudited:ago(d),lastAuditor:'Rick',lockedBy:null,lockedAt:null,cycleAuditId:null,createdAt:ago(d+5)};
+    S.courses.push(c);S.audits.push({id:'A'+S.seq.a++,courseId:c.id,date:ago(d),result:'Passed',auditor:'Rick',checklist:CRITERIA.map(()=>'Yes'),price,audience:'Partner',issues:[],note:''});
+    log({ts:ago(d),actor:'Rick',courseId:c.id,action:'Audit passed',detail:'Iteration 1'})});
   addCourse('SAMPLE-101','Sample: not escalated yet',12,[
     {cat:'Pricing',desc:'Price in the catalog is out of date',status:'New',raised:12},
     {cat:'Content',desc:'Lab guide link is broken',status:'New',raised:9},
@@ -853,7 +874,7 @@ function checkImport(kind,rows){
   return {ready,skipped}}
 function impChooser(){impModal(`<div class="ov-h"><h3>Import courses</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
   <div class="ov-b"><p class="muted" style="margin:0">Which courses are in your file?</p>
-    <button class="imp-kind" data-a="impKind" data-id="new"><b>New courses</b><span>Not audited yet. They go to Pending audit and the 7-day clock starts.</span></button>
+    <button class="imp-kind" data-a="impKind" data-id="new"><b>New courses</b><span>Not audited yet. They go to Pending audit and the ${AUDIT_DAYS}-day audit clock starts.</span></button>
     <button class="imp-kind" data-a="impKind" data-id="old"><b>Existing courses</b><span>Already audited. Their last result and open issues come with them.</span></button>${impHistLink()}</div>
   <div class="ov-f"><button class="btn" data-a="close">Cancel</button></div>`)}
 function impUpload(kind,msg){imp={kind};const isNew=kind==='new';
@@ -986,7 +1007,7 @@ const A={
   open(id){go('course',id)},
   openAuditor(id){go('auditor',id)},
   teamP(id){teamP=id;render()},
-  filter(id){filter=id;refreshRows()},
+  filter(id){filter=id===filter?'all':id;refreshRows()}, // clicking the chosen status again goes back to All
   leaveAudit(){const next=leaveNext;leaveNext=null;closeOv();draftStart=JSON.stringify(draft);next?.()},
   goFilter(id){if(leaveGuard(()=>A.goFilter(id)))return;filter=id;go('courses')},
   signIn(){const id=document.querySelector('input[name=loginUser]:checked')?.value;
@@ -994,7 +1015,7 @@ const A={
     user=USERS.find(u=>u.id===id);try{sessionStorage.setItem(LOGIN_KEY,id)}catch(e){}
     view={name:'dashboard'};enterAnim=true;render();window.scrollTo(0,0)},
   signOut(){if(leaveGuard(()=>A.signOut()))return;
-    go('dashboard');closeOv();user=null;lastImp=null;try{sessionStorage.removeItem(LOGIN_KEY)}catch(e){}
+    go('dashboard');closeOv();user=null;lastImp=null;sortK='';sortD=1;try{sessionStorage.removeItem(LOGIN_KEY)}catch(e){}
     filter='all';myF=false;catFilter='';tkF='';auditedF='';search='';page=1;render();window.scrollTo(0,0)},
   impHistory(){openModal(`<div class="ov-h"><h3>Import history</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
     <div class="ov-b"><div class="tbl-wrap"><table class="imp-tbl"><thead><tr><th>File</th><th>Type</th><th>Courses</th><th>Imported by</th><th></th></tr></thead><tbody>${impHistoryRows()}</tbody></table></div></div>
@@ -1096,6 +1117,10 @@ const A={
   dashGo(id){if(leaveGuard(()=>A.dashGo(id)))return;const [kind,k]=[id.slice(0,1),id.slice(2)];search='';catFilter='';auditedF='';myF=false;page=1;
     filter=kind==='c'?k:'all';tkF=kind==='t'?k:'';go('courses')},
   tkHl(id){tkF=tkF===id?'':id;refreshRows()},
+  sortBy(k){if(sortK!==k){sortK=k;sortD=1}else if(sortD>0)sortD=-1;else{sortK='';sortD=1}
+    document.querySelectorAll('th[data-sort]').forEach(th=>{const on=th.dataset.sort===sortK;on?th.setAttribute('aria-sort',sortD>0?'ascending':'descending'):th.removeAttribute('aria-sort');
+      th.querySelector('i').textContent=sortMark(th.dataset.sort)});
+    refreshRows()},
   clearF(){search='';catFilter='';tkF='';auditedF='';filter='all';myF=false;
     $('#search').value='';['statusF','catFilter','auditedF'].forEach(id=>{$('#'+id).value='';$('#'+id).classList.remove('on')});refreshRows()},
   reset(){openModal(`<div class="ov-h"><h3>Clear all data?</h3><button class="x" data-a="close" aria-label="Close">×</button></div><div class="ov-b">All courses, audits, tickets and history in this browser will be removed.</div><div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn danger" data-a="doReset">Clear</button></div>`)},
@@ -1104,7 +1129,7 @@ const A={
   toggleAlerts(){listOpen.has('alerts')?listOpen.delete('alerts'):listOpen.add('alerts');$('#alertPanel').outerHTML=alertPanel()},
   toggleList(k){listOpen.has(k)?listOpen.delete(k):listOpen.add(k);render()},
   samples(){const had=S.courses.some(c=>c.sample);had?removeSamples():addSamples();save();render();
-    toast(had?'7-day samples removed':'7-day samples added · 5 courses, 7 tickets')},
+    toast(had?'Samples removed':'Samples added · 8 courses, 7 tickets')},
   doReset(){fresh();draft=null;lastImp=null;closeOv();go('courses');toast('All data cleared')},
   startAudit(id,re){const c=course(id);c.lockedBy=user.name;c.lockedAt=Date.now();if(!re)c.auditorStatus='In Progress';
     const last=re?S.audits.filter(a=>a.courseId===id&&a.checklist?.length===8).sort((a,b)=>b.date-a.date)[0]?.checklist:null;
@@ -1157,6 +1182,7 @@ const A={
     log({courseId:id,action:'Course restored',detail:`Back in Pending audit${same.length?`; restored anyway, same as ${same.map(x=>x.code).join(', ')}`:''}`});save();closeOv();render();toast(`${c.code} restored · Pending audit`)},
   reaudit(id){if(isAud())A.startAudit(id,true)},
   // a re-audit that finds a No asks once before the healthy course turns Unhealthy
+  confirmSame(){if(!draft)return closeOv();draft.same=true;closeOv();submitAudit()},
   confirmFail(){if(!draft)return closeOv();draft.ok=true;closeOv();submitAudit()},
   escalate(id){const t=ticket(id);t.status='Escalated';t.escalatedAt=t.escalatedAt||Date.now();t.escalatedBy=user.name;tlog(t,'Escalated');save();
     // go straight on to the fix date: the card opens its form in place
