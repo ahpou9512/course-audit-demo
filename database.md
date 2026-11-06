@@ -39,7 +39,6 @@ erDiagram
     string Name
     string Type
     decimal DoceboPrice
-    string Currency
     string Health
     string AuditStatus
     int CurrentAuditId FK
@@ -232,7 +231,7 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 | | New courses | Existing courses |
 |---|---|---|
 | 谁可以用 | Auditor、Course Owner | 只有 Auditor，因为会写入 audit 结果 |
-| 模板栏位 | Course Code、Course Name、Type | 前三栏，加 Course Status、Docebo Price、Currency、Audience、8 项 criteria、Audit Owner、Audit Date、Audit Note、Issue、Category，共 20 栏 |
+| 模板栏位 | Course Code、Course Name、Type | 前三栏，加 Course Status、Docebo Price、Audience、8 项 criteria、Audit Owner、Audit Date、Audit Note、Issue、Category，共 19 栏 |
 | 导入后 | `Pending Audit`，等 audit 的 7 天从导入时算 | `Course Status = Discontinued` 就下架；否则有 `No` 是 `Unhealthy` 并开 `New` ticket；都不是就 `Healthy`，`AuditCount = 1` |
 
 - 这些都算错误，会挡下整个文件，并逐项列出行号、课程、栏位、文件里的值和问题：系统里已有的 Course Code（包括 Discontinued）、文件里重复的 Course Code、资料不合规则的行。
@@ -244,7 +243,7 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 - 导入的 ticket：`CreatedAt` 是 Audit Date，`SlaStartAt` 是导入当天，escalate 的 7 天从 `SlaStartAt` 算。手动开的 ticket `SlaStartAt` 是空的，从 `CreatedAt` 算。
 - `Course Status = Discontinued`：不检查 criteria，空白的存成 `N/A`，也不能有 Issue（要写在 Audit Note）；原因必填，写在 Audit Note，存进 `DiscontinueReason`。Audit 记录照样保留，也可以 restore。
 - Audit Note 存在那次 audit 的备注里，不开 ticket。
-- `Currency` 选填，3 个英文字母；有 Currency 就一定要有 Docebo Price。空的表示资料没写币种。
+- 所有价格都是 USD，不存币种。旧文件如果有 `Currency` 栏，填了 USD 以外的值就算错误。
 - `E-Learning` 导入时改成 `Learning Plan`。
 - Audit Date：Excel 的日期格式可以；文字只接受 `YYYY-MM-DD`，因为 `03/10/2026` 分不出哪个是月。
 - Course Code 比较和保存前都要清理：去掉隐藏字符，全角字符和各种破折号转成一般字符，多个空格合并成一个，头尾空格去掉；比较时不分大小写。Add course、编辑课程和导入都一样。

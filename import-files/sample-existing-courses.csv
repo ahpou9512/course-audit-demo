@@ -1,8 +1,8 @@
-﻿Course Code,Course Name,Type,Course Status,Docebo Price,Currency,Audience,Search on Dell Learning works,Course Description (PDF) works,Enrollment works,Launch URL works,Course launches on first attempt,No error page,No access denied,Completion recorded,Audit Owner,Audit Date,Audit Note,Issue,Category
-DEMO-E201,Hyperconverged Infrastructure Overview,Learning Plan,Active,0,,Partner,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-11-01,,,
-DEMO-E202,Backup and Recovery Workshop,ILT,Active,320,USD,"Customer, Partner",Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Calvin,2026-11-02,Fixed: added the Partner audience,,
-DEMO-E203,Client Devices Sales Basics,On-Demand,Active,160,USD,"DSP, Partner",N/A,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-11-03,,,
-DEMO-E204,Virtualization Administration,ILT,Active,7800,CNY,Partner,Yes,No,Yes,Yes,Yes,Yes,Yes,Yes,Calvin,2026-10-25,,Course description PDF will not open,CD PDF
-DEMO-E205,Modern Data Center Foundations,Learning Plan,Active,100,USD,Customer,Yes,Yes,Yes,No,Yes,Yes,Yes,No,Rick,2026-11-03,,Launch link goes to a retired page,Course Setup
-DEMO-E205,,,,,,,,,,,,,,,,,,Completion is not recorded after the final module,IT issue
-DEMO-E207,Legacy Storage Administration,ILT,Discontinued,480,USD,Partner,No,No,No,No,No,No,No,No,Rick,2026-10-17,Replaced by DEMO-E201,,
+﻿Course Code,Course Name,Type,Course Status,Docebo Price,Audience,Search on Dell Learning works,Course Description (PDF) works,Enrollment works,Launch URL works,Course launches on first attempt,No error page,No access denied,Completion recorded,Audit Owner,Audit Date,Audit Note,Issue,Category
+DEMO-E201,Hyperconverged Infrastructure Overview,Learning Plan,Active,0,Partner,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-11-01,,,
+DEMO-E202,Backup and Recovery Workshop,ILT,Active,320,"Customer, Partner",Yes,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Calvin,2026-11-02,Fixed: added the Partner audience,,
+DEMO-E203,Client Devices Sales Basics,On-Demand,Active,160,"DSP, Partner",N/A,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-11-03,,,
+DEMO-E204,Virtualization Administration,ILT,Active,480,Partner,Yes,No,Yes,Yes,Yes,Yes,Yes,Yes,Calvin,2026-10-25,,Course description PDF will not open,CD PDF
+DEMO-E205,Modern Data Center Foundations,Learning Plan,Active,100,Customer,Yes,Yes,Yes,No,Yes,Yes,Yes,No,Rick,2026-11-03,,Launch link goes to a retired page,Course Setup
+DEMO-E205,,,,,,,,,,,,,,,,,Completion is not recorded after the final module,IT issue
+DEMO-E207,Legacy Storage Administration,ILT,Discontinued,480,Partner,No,No,No,No,No,No,No,No,Rick,2026-10-17,Replaced by DEMO-E201,,

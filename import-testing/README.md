@@ -12,7 +12,7 @@
 | `02-new-duplicate-code.csv` | New | 挡下，1 个问题（大小写不同也算重复） | 通过 |
 | `03-new-same-name.csv` | New | 可以导入 2 门，1 个同名警告 | 通过 |
 | `04-existing-valid.xlsx` | Existing | 3 Healthy、2 Unhealthy、1 Discontinued、3 张 ticket | 通过 |
-| `05-existing-bad-data.csv` | Existing | 挡下，13 个问题 | 通过 |
+| `05-existing-bad-data.csv` | Existing | 挡下，12 个问题 | 通过 |
 | `06-existing-same-code-different-data.csv` | Existing | 挡下，2 个问题（Course Name 和 Docebo Price 不同） | 通过 |
 | `07-existing-same-issue-twice.csv` | Existing | 可以导入 1 门，只开 1 张 ticket，有警告 | 通过 |
 | `08-wrong-template.csv` | New | 不接受，提示改用 Import existing courses | 通过 |
@@ -20,8 +20,9 @@
 | `10-date-formats.csv` | Existing | 挡下，2 个问题（文字日期只接受 `YYYY-MM-DD`） | 通过 |
 | `11-hidden-character-code.csv` | New | 挡下，2 个问题（隐藏字符和多余空格不能绕过重复检查） | 通过 |
 | `12-audit-owner-names.csv` | Existing | **应该检查名字；现在 3 行都能导入** | **问题 3** |
-| `13-price-currency-audience.csv` | Existing | **应该挡下；现在 3 行都能导入** | **问题 5** |
+| `13-price-audience.csv` | Existing | **应该挡下；现在 2 行都能导入** | **问题 5** |
 | `14-new-large-1000.csv` | New | 可以导入 1,000 门 | 通过 |
+| `15-old-template-with-currency.csv` | Existing | 挡下，1 个问题（旧模板里的 CNY）；USD 那行本身没问题 | 通过 |
 
 ## UAT 结果
 
@@ -46,7 +47,7 @@
 | 2 | 已修好 | 隐藏字符和多余空格可以绕过 Course Code 重复检查 | `DT-H1` 和后面带零宽字符的 `DT-H1` 算两门；`DT H1` 和 `DT  H1` 也算两门 | 比较前删除隐藏字符、合并空格 |
 | 3 | 中 | Audit Owner 不检查 | `Zed`、`rick`、SELM 的 `Gary` 都能导入。Team 页不算这些 audit，`rick` 的不算进 Rick | 待决定，见问题 B |
 | 4 | 已修好 | 导入后没有撤销 | Existing 导入的课程没有 Delete，要清掉只能 Clear all data（全部资料） | 已加整批撤销：Courses 页的 Undo import 和 Import history |
-| 5 | 中 | 没有上限和合理性检查 | 价格 `999999999999` 超过数据库 `decimal(10,2)`；币种 `ZZZ`；`Partner, partner` 存成两个；日期 `1900-01-01` 也接受 | 加上限、币种清单，Audience 去重 |
+| 5 | 中 | 没有上限和合理性检查 | 价格 `999999999999` 超过数据库 `decimal(10,2)`；`Partner, partner` 存成两个；日期 `1900-01-01` 也接受 | 加上限、币种清单，Audience 去重 |
 | 6 | 中 | Code 和 Name 没有长度限制 | 300 字的 Code、3,000 字的 Name 都能导入，可能撑破版面 | 和数据库长度一致 |
 | 7 | 低 | 只读第一张 sheet，提示没有说明 | 第一张是 Summary 时，只提示缺少栏位 | 提示里写明读的是哪张 sheet |
 | 8 | 低 | CSV 不是 UTF-8 时，中文变乱码也能导入 | GBK 编码的中文名称变成 `����` | 发现乱码就挡下 |
@@ -65,7 +66,7 @@
 | D | 谁可以导入 Existing？只要 Auditor 就够吗？还是要 Admin？ | 这个操作可以改很多资料，也会写入别人的 audit 结果 |
 | E | 要不要 Import updates（批量更新已有课程）？ | 现在已有的 Course Code 一律挡下，要改只能手动 |
 | F | 550 张 ticket 同一天开始算 7 天，SELM 处理得完吗？ | 可能一周后同时全部超时，可以考虑分批导入 |
-| G | Currency 留空代表什么？可以当作 USD 吗？ | 旧资料大部分没写币种 |
+| G | 旧资料 49 行 CNY 价格要怎么换成 USD？ | 系统只用 USD，这些行不能直接导入，已放进 `Needs review`；另外没写币种的价格会被当作 USD，要确认对不对 |
 | H | 多个 Category 拆成多张相同文字的 ticket，团队可以接受吗？ | 真实文件因此多了 105 张 |
 | I | `Needs review` 的 1,605 行谁负责看？什么时候看完？ | 这些改好前，只有 1,087 门课能进系统 |
 

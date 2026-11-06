@@ -310,7 +310,7 @@ const canEditInfo=c=>canPrice()&&c.health==='Unhealthy'&&!c.lockedBy;
 function refreshTrail(c){const a=S.audits.find(x=>x.id===c.cycleAuditId),iter=a&&$('#ck-'+a.id)?.closest('.iter');if(!iter)return;
   openEdits.add(a.id);iter.querySelector('.aedit')?.remove();iter.querySelector('.ainfo').insertAdjacentHTML('afterend',editTrail(a));iter.querySelector('.aedit')?.classList.add('fresh')}
 const refreshInfo=c=>{if($('#priceBox'))$('#priceBox').innerHTML=priceView(c);if($('#audBox'))$('#audBox').innerHTML=audView(c)};
-const priceView=c=>`Pricing <b>${c.currency&&c.price!=null?`${esc(c.currency)} `:''}${fmtPrice(c.price)}</b>${canEditInfo(c)?` <button class="link small" data-a="editPrice" data-id="${c.id}">Edit</button>`:''}`;
+const priceView=c=>`Pricing <b>${fmtPrice(c.price)}</b>${canEditInfo(c)?` <button class="link small" data-a="editPrice" data-id="${c.id}">Edit</button>`:''}`;
 const audView=c=>`Audience <b>${esc(c.audience||'—')}</b>${canEditInfo(c)?` <button class="link small" data-a="editAud" data-id="${c.id}">Edit</button>`:''}`;
 // dashboard breakdown cards can be folded away; the choice is remembered per browser
 const FOLD_KEY='course-audit-fold';
@@ -334,7 +334,7 @@ const critChips=a=>{const no=CRITERIA.filter((_,j)=>a.checklist[j]==='No'),yes=a
 // pricing and audience as they were at that audit; a value that differs from the audit before it shows what it was
 const auditInfo=(a,prev)=>{const v=(k,f)=>a[k]===undefined?'—':f(a[k]),moved=k=>prev&&a[k]!==undefined&&prev[k]!==undefined&&prev[k]!==a[k];
   const part=(l,k,f)=>`<span>${l} ${moved(k)?`<s>${esc(f(prev[k]))}</s> → <b class="chg">${esc(v(k,f))}</b>`:`<b>${esc(v(k,f))}</b>`}</span>`;
-  return `<div class="ainfo">${part('Pricing','price',x=>x==null?'—':`${a.currency?`${a.currency} `:''}${fmtPrice(x)}`)}${part('Audience','audience',x=>x||'—')}</div>`};
+  return `<div class="ainfo">${part('Pricing','price',fmtPrice)}${part('Audience','audience',x=>x||'—')}</div>`};
 // the auditor can correct the criteria of the current audit while its tickets are still open
 function critEditor(a){
   return `<div class="crit-edit"><div class="crit">${CRITERIA.map((l,i)=>`<div class="crit-row${a.checklist[i]==='No'?' no':''}"><span>${l}</span>
@@ -724,7 +724,7 @@ function tlog(t,action,detail){log({courseId:t.courseId,ticketId:t.id,action,det
 // new courses start at Pending audit; existing courses bring their last audit result and open issues with them
 const COURSE_TYPES=['Learning Plan','ILT','On-Demand'];
 const IMP_NEW=['Course Code','Course Name','Type'];
-const IMP_OLD=[...IMP_NEW,'Course Status','Docebo Price','Currency','Audience',...CRITERIA,'Audit Owner','Audit Date','Audit Note','Issue','Category'];
+const IMP_OLD=[...IMP_NEW,'Course Status','Docebo Price','Audience',...CRITERIA,'Audit Owner','Audit Date','Audit Note','Issue','Category'];
 const IMP_COLS={new:IMP_NEW,old:IMP_OLD};
 const IMP_SHOW=100, IMP_PROBLEMS=500;
 let imp=null, xlsxLoad=null, lastImp=null;
@@ -796,9 +796,8 @@ function checkImport(kind,rows){
       if(disc!=='active'&&disc!=='discontinued')bad('Course Status',get(first,'Course Status'),'Course status must be Active or Discontinued.');
       const isDisc=disc==='discontinued';
       const price=toPrice(get(first,'Docebo Price'));if(Number.isNaN(price))bad('Docebo Price',get(first,'Docebo Price'),'Docebo price must be a number of 0 or more, with no commas or symbols.');
-      const currency=impText(get(first,'Currency')).toUpperCase();
-      if(currency&&!/^[A-Z]{3}$/.test(currency))bad('Currency',get(first,'Currency'),'Currency must be a 3-letter code, like USD or CNY.');
-      if(currency&&price==null)bad('Docebo Price','','Currency is filled in, but Docebo price is blank.');
+      // every price is in USD; an older file with another currency must not slip in as USD
+      if('currency' in col)g.forEach(o=>{const cur=impText(get(o.r,'Currency'));if(cur&&cur.toUpperCase()!=='USD')bad('Currency',cur,'Prices must be in USD.',o.row)});
       const aud=audList(get(first,'Audience')).map(a=>({a,hit:AUDIENCES.find(o=>o.toLowerCase()===a.toLowerCase())}));
       aud.filter(a=>!a.hit).forEach(a=>bad('Audience',a.a,`Audience must be ${AUDIENCES.join(', ')}.`));
       const crit=CRITERIA.map((h,i)=>{const v=get(first,h);return impText(v)?impAnswer(v,i):''});
@@ -826,7 +825,7 @@ function checkImport(kind,rows){
         seenIssues.add(issueKey);issues.push({cat:cat||rawCat,desc})});
       if(!isDisc&&anyNo&&!issues.length){const nos=CRITERIA.filter((_,i)=>crit[i]==='No');bad('Issue','',`${nos.join(', ')} ${nos.length>1?'are':'is'} No, but Issue is blank.`)}
       if(!isDisc&&!anyNo&&issues.length)bad('Issue',issues[0].desc,'Issue is filled in, but no criterion is marked No.');
-      Object.assign(x,{disc:isDisc,price:Number.isNaN(price)?null:price,currency,audience:aud.map(a=>a.hit).filter(Boolean).join(', '),crit:crit.map(v=>v||(isDisc?'N/A':'Yes')),auditor,date,note,issues,dupes,failed:anyNo&&!isDisc,anyNo})}
+      Object.assign(x,{disc:isDisc,price:Number.isNaN(price)?null:price,audience:aud.map(a=>a.hit).filter(Boolean).join(', '),crit:crit.map(v=>v||(isDisc?'N/A':'Yes')),auditor,date,note,issues,dupes,failed:anyNo&&!isDisc,anyNo})}
     if(failedCheck)continue;
     const nameKey=normName(name);if(!x.warn)x.warn=names.get(nameKey)||'';if(!names.has(nameKey))names.set(nameKey,code);
     ready.push(x)}
@@ -873,8 +872,8 @@ function importCourse(x,kind,file,bid){
   const c={id:'C'+S.seq.c++,code:x.code,name:x.name,type:x.type,price:null,audience:'',health:'Pending Audit',auditorStatus:'Pending',auditCount:0,lastAudited:null,lastAuditor:null,lockedBy:null,lockedAt:null,cycleAuditId:null,createdAt:Date.now()};
   c.importId=bid;S.courses.push(c);log({importId:bid,courseId:c.id,action:'Course registered',detail:`Imported from ${file}`});
   if(kind==='new')return;
-  c.price=x.price;c.currency=x.currency;c.audience=x.audience;c.lastAudited=x.date;c.lastAuditor=x.auditor;
-  const a={id:'A'+S.seq.a++,courseId:c.id,date:x.date,result:x.anyNo?'Failed':'Passed',auditor:x.auditor,checklist:x.crit,price:x.price,currency:x.currency,audience:x.audience,issues:x.issues.map(i=>({...i})),note:`Imported from file${x.note?` · ${x.note}`:''}`};
+  c.price=x.price;c.audience=x.audience;c.lastAudited=x.date;c.lastAuditor=x.auditor;
+  const a={id:'A'+S.seq.a++,courseId:c.id,date:x.date,result:x.anyNo?'Failed':'Passed',auditor:x.auditor,checklist:x.crit,price:x.price,audience:x.audience,issues:x.issues.map(i=>({...i})),note:`Imported from file${x.note?` · ${x.note}`:''}`};
   S.audits.push(a);
   if(x.disc){
     c.health='Discontinued';c.auditorStatus='Completed';
@@ -890,15 +889,15 @@ function importCourse(x,kind,file,bid){
 function impSampleRows(kind){
   const ymd=d=>toInput(Date.now()-d*DAY);
   if(kind==='new')return [['DEMO-N101','Storage Fundamentals','Learning Plan'],['DEMO-N102','Networking Essentials','On-Demand'],['DEMO-N103','Server Administration Workshop','ILT'],['DEMO-N104','Cloud Basics','On-Demand'],['DEMO-N105','Data Protection Overview','Learning Plan']];
-  const y=(...no)=>CRITERIA.map((_,i)=>no.includes(i)?'No':'Yes'),row=(code,name,type,status,price,cur,aud,crit,who,d,note='',issue='',cat='')=>[code,name,type,status,price,cur,aud,...crit,who,ymd(d),note,issue,cat];
-  const more=(code,issue,cat)=>[code,'','','','','','',...CRITERIA.map(()=>''),'','','',issue,cat];
-  return [row('DEMO-E201','Hyperconverged Infrastructure Overview','Learning Plan','Active',0,'','Partner',y(),'Rick',5),
-    row('DEMO-E202','Backup and Recovery Workshop','ILT','Active',320,'USD','Customer, Partner',y(),'Calvin',4,'Fixed: added the Partner audience'),
-    row('DEMO-E203','Client Devices Sales Basics','On-Demand','Active',160,'USD','DSP, Partner',['N/A',...y().slice(1)],'Rick',3),
-    row('DEMO-E204','Virtualization Administration','ILT','Active',7800,'CNY','Partner',y(1),'Calvin',12,'','Course description PDF will not open','CD PDF'),
-    row('DEMO-E205','Modern Data Center Foundations','Learning Plan','Active',100,'USD','Customer',y(3,7),'Rick',3,'','Launch link goes to a retired page','Course Setup'),
+  const y=(...no)=>CRITERIA.map((_,i)=>no.includes(i)?'No':'Yes'),row=(code,name,type,status,price,aud,crit,who,d,note='',issue='',cat='')=>[code,name,type,status,price,aud,...crit,who,ymd(d),note,issue,cat];
+  const more=(code,issue,cat)=>[code,'','','','','',...CRITERIA.map(()=>''),'','','',issue,cat];
+  return [row('DEMO-E201','Hyperconverged Infrastructure Overview','Learning Plan','Active',0,'Partner',y(),'Rick',5),
+    row('DEMO-E202','Backup and Recovery Workshop','ILT','Active',320,'Customer, Partner',y(),'Calvin',4,'Fixed: added the Partner audience'),
+    row('DEMO-E203','Client Devices Sales Basics','On-Demand','Active',160,'DSP, Partner',['N/A',...y().slice(1)],'Rick',3),
+    row('DEMO-E204','Virtualization Administration','ILT','Active',480,'Partner',y(1),'Calvin',12,'','Course description PDF will not open','CD PDF'),
+    row('DEMO-E205','Modern Data Center Foundations','Learning Plan','Active',100,'Customer',y(3,7),'Rick',3,'','Launch link goes to a retired page','Course Setup'),
     more('DEMO-E205','Completion is not recorded after the final module','IT issue'),
-    row('DEMO-E207','Legacy Storage Administration','ILT','Discontinued',480,'USD','Partner',y(0,1,2,3,4,5,6,7),'Rick',20,'Replaced by DEMO-E201')]}
+    row('DEMO-E207','Legacy Storage Administration','ILT','Discontinued',480,'Partner',y(0,1,2,3,4,5,6,7),'Rick',20,'Replaced by DEMO-E201')]}
 async function impDownload(kind,what){
   const name=`${what==='sample'?'sample':'template'}-${kind==='new'?'new':'existing'}-courses.xlsx`,aoa=[IMP_COLS[kind],...(what==='sample'?impSampleRows(kind):[])];
   try{await loadXlsx()}catch(e){return toast("Couldn't load the Excel library. Check your connection.")}

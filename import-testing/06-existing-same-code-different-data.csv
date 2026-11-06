@@ -1,3 +1,3 @@
-﻿Course Code,Course Name,Type,Course Status,Docebo Price,Currency,Audience,Search on Dell Learning works,Course Description (PDF) works,Enrollment works,Launch URL works,Course launches on first attempt,No error page,No access denied,Completion recorded,Audit Owner,Audit Date,Audit Note,Issue,Category
-DT-C1,Test First Course,ILT,Active,100,USD,Partner,No,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-10-20,,Issue one,Content
-DT-C1,Test Another Course,ILT,Active,999,USD,Partner,No,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-10-20,,Issue two,Other
+﻿Course Code,Course Name,Type,Course Status,Docebo Price,Audience,Search on Dell Learning works,Course Description (PDF) works,Enrollment works,Launch URL works,Course launches on first attempt,No error page,No access denied,Completion recorded,Audit Owner,Audit Date,Audit Note,Issue,Category
+DT-C1,Test First Course,ILT,Active,100,Partner,No,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-10-20,,Issue one,Content
+DT-C1,Test Another Course,ILT,Active,999,Partner,No,Yes,Yes,Yes,Yes,Yes,Yes,Yes,Rick,2026-10-20,,Issue two,Other
