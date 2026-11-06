@@ -399,6 +399,7 @@ td>.aud-sla{display:block;margin-top:4px}
 .ci.other>*{opacity:.4} /* .ci is display:contents, so fade its children */
 .crit-edit{margin-top:8px}
 .crit-edit .tk-btns{justify-content:flex-end;margin-top:10px}
+.crit-edit .tk-back{margin-left:0}
 .tk-form{flex-basis:100%;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;padding-top:10px;border-top:1px dashed var(--line)}
 .tk-form .grow{flex:1 1 220px}
 .tk-btns{display:flex;gap:6px;flex-wrap:wrap}

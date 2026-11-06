@@ -616,7 +616,7 @@ function vDash(){
   const tm=(v,l,t,k)=>`<button class="metric" data-a="dashGo" data-id="t:${k}" style="--tone:var(${t})"><b>${v}</b><span>${l}</span></button>`;
   const from=rptFrom??dayStart(Date.now()-6*DAY), to=rptTo??dayStart(Date.now());
   const inR=S.logs.filter(l=>l.ts>=from&&l.ts<to+DAY), cnt=a=>inR.filter(l=>l.action===a).length;
-  return `<div class="head"><h2>Dashboard</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-a="samples">${S.courses.some(c=>c.sample)?'Remove samples':'Add samples'}</button><button class="btn sm" data-a="reset">Clear all data</button></div></div>
+  return `<div class="head"><h2>Dashboard</h2>${isAud()?`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-a="samples">${S.courses.some(c=>c.sample)?'Remove samples':'Add samples'}</button><button class="btn sm" data-a="reset">Clear all data</button></div>`:''}</div>
   <span class="sec-label">Courses</span>
   <div class="metric hero" style="--tone:var(--accent)"><button class="hero-link" data-a="dashGo" data-id="c:all"><b>${cs.all}</b><span>Active courses</span></button><small class="hero-sla${lateAud.length?' bad':''}">${lateAud.length} not audited in ${AUDIT_DAYS}d</small>${foldBtn('courses')}</div>
   <div class="fold-box${fold.courses?' shut':''}" id="fold-courses"><div class="metrics">${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to revalidate','--pv','verify')}${m(cs.audit,'Pending audit','--warn','audit')}</div></div>
@@ -711,7 +711,8 @@ function closeCycle(c){
     log({courseId:c.id,action:'Course discontinued',detail:'Archived and removed from active queues'});
     return 'Course discontinued';
   }
-  c.health='Healthy';c.auditorStatus='Completed';c.auditCount++;c.lastAudited=Date.now();c.lastAuditor=user.name;
+  c.health='Healthy';c.auditorStatus='Completed';c.auditCount++;
+  // Last audited stays on the last full audit: this only confirms the fixes, it doesn't check all 8 criteria again
   // every issue is fixed, so the failed criteria become Yes; N/A answers stay N/A
   const prev=S.audits.find(a=>a.id===c.cycleAuditId)?.checklist;
   addAudit(c,'Passed',prev?prev.map(v=>v==='N/A'?'N/A':'Yes'):null,{price:c.price,audience:c.audience},[],'Re-verification after fixes');
@@ -994,13 +995,17 @@ function impRun(bid,kind,file,ready){const n=ready.length,plural=`course${n===1?
     if(p>=1){clearInterval(tick);setTimeout(done,180)}},40)}
 
 // a whole import can be taken back until someone has worked on one of its courses, so nobody's work is removed by accident
+function refreshMine(){const b=$('.fchip.mine b');if(!b)return;
+  const mineNow=S.tickets.filter(t=>t.status!==CLOSED&&t.escalatedBy===user.name&&(view.name!=='course'||t.courseId===view.id));b.textContent=mineNow.length;
+  if(myF)document.querySelectorAll('#tree .tree-kid').forEach(k=>k.classList.toggle('faded',ticket(k.dataset.slot)?.escalatedBy!==user.name))}
 const canUndoImp=b=>isAud()||b.by===user.name;
 function impWorked(id){const worked=new Set(S.logs.filter(l=>!l.importId).map(l=>l.courseId));
   return S.courses.filter(c=>c.importId===id&&(c.lockedBy||worked.has(c.id)))}
 const impHistLink=()=>S.imports.length?`<button class="link small imp-hist" data-a="impHistory">Import history (${S.imports.length})</button>`:'';
-function impBanner(){const b=S.imports.find(x=>x.id===lastImp);if(!b||b.undoneAt||!canUndoImp(b))return '';
+const impLeft=id=>S.courses.filter(c=>c.importId===id).length;
+function impBanner(){const b=S.imports.find(x=>x.id===lastImp);if(!b||b.undoneAt||!canUndoImp(b)||!impLeft(b.id))return '';
   return `<div class="imp-banner" id="impBanner"><span>${b.count} course${b.count===1?'':'s'} imported from <b>${esc(b.file)}</b>.</span><button class="link" data-a="impUndo" data-id="${b.id}">Undo import</button><button class="x" data-a="dismissImp" aria-label="Dismiss">×</button></div>`}
-function impHistoryRows(){return [...S.imports].reverse().slice(0,20).map(b=>`<tr><td>${esc(b.file)}</td><td>${b.kind==='new'?'New':'Existing'}</td><td>${b.count}</td><td>${esc(b.by)}<div class="muted small">${fmtDT(b.ts)}</div></td><td>${b.undoneAt?`<span class="muted small">Undone by ${esc(b.undoneBy)}<br>${fmtDT(b.undoneAt)}</span>`:canUndoImp(b)?`<button class="btn sm" data-a="impUndo" data-id="${b.id}">Undo</button>`:'<span class="muted small">—</span>'}</td></tr>`).join('')}
+function impHistoryRows(){return [...S.imports].reverse().slice(0,20).map(b=>`<tr><td>${esc(b.file)}</td><td>${b.kind==='new'?'New':'Existing'}</td><td>${b.count}</td><td>${esc(b.by)}<div class="muted small">${fmtDT(b.ts)}</div></td><td>${b.undoneAt?`<span class="muted small">Undone by ${esc(b.undoneBy)}<br>${fmtDT(b.undoneAt)}</span>`:!impLeft(b.id)?'<span class="muted small">No courses left</span>':canUndoImp(b)?`<button class="btn sm" data-a="impUndo" data-id="${b.id}">Undo</button>`:'<span class="muted small">—</span>'}</td></tr>`).join('')}
 
 const A={
   go(id){go(id)},
@@ -1021,7 +1026,7 @@ const A={
     <div class="ov-b"><div class="tbl-wrap"><table class="imp-tbl"><thead><tr><th>File</th><th>Type</th><th>Courses</th><th>Imported by</th><th></th></tr></thead><tbody>${impHistoryRows()}</tbody></table></div></div>
     <div class="ov-f"><button class="btn" data-a="close">Close</button></div>`);$('.modal').classList.add('imp-wide')},
   dismissImp(){lastImp=null;$('#impBanner')?.remove()},
-  impUndo(id){const b=S.imports.find(x=>x.id===id);if(!b||b.undoneAt||!canUndoImp(b))return;const busy=impWorked(id);
+  impUndo(id){const b=S.imports.find(x=>x.id===id);if(!b||b.undoneAt||!canUndoImp(b)||!impLeft(id))return;const busy=impWorked(id);
     if(busy.length){const codes=busy.slice(0,10).map(c=>esc(c.code)).join(', ');
       return openModal(`<div class="ov-h"><h3>Can't undo this import</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
       <div class="ov-b"><p style="margin:0">${busy.length} course${busy.length>1?'s have':' has'} been worked on since it was imported, so undoing would lose that work. Nothing was changed.</p><p class="muted small" style="margin:0">${codes}${busy.length>10?` and ${busy.length-10} more`:''}</p></div>
@@ -1114,7 +1119,7 @@ const A={
     box.classList.toggle('open',open);box.querySelector('[data-a=toggleEdits]').textContent=open?'Hide changes':'Show changes'},
   toggleHist(id){const h=$('#hist-'+id),b=document.querySelector(`[data-a=toggleHist][data-id="${id}"]`),open=!openHist.has(id),n=+b.dataset.n;
     open?openHist.add(id):openHist.delete(id);h.classList.add('reveal');h.classList.toggle('open',open);b.textContent=open?'Show less':`Show ${n} earlier audit${n>1?'s':''}`},
-  dashGo(id){if(leaveGuard(()=>A.dashGo(id)))return;const [kind,k]=[id.slice(0,1),id.slice(2)];search='';catFilter='';auditedF='';myF=false;page=1;
+  dashGo(id){if(leaveGuard(()=>A.dashGo(id)))return;const [kind,k]=[id.slice(0,1),id.slice(2)];sortK='';sortD=1;search='';catFilter='';auditedF='';myF=false;page=1;
     filter=kind==='c'?k:'all';tkF=kind==='t'?k:'';go('courses')},
   tkHl(id){tkF=tkF===id?'':id;refreshRows()},
   sortBy(k){if(sortK!==k){sortK=k;sortD=1}else if(sortD>0)sortD=-1;else{sortK='';sortD=1}
@@ -1123,14 +1128,14 @@ const A={
     refreshRows()},
   clearF(){search='';catFilter='';tkF='';auditedF='';filter='all';myF=false;
     $('#search').value='';['statusF','catFilter','auditedF'].forEach(id=>{$('#'+id).value='';$('#'+id).classList.remove('on')});refreshRows()},
-  reset(){openModal(`<div class="ov-h"><h3>Clear all data?</h3><button class="x" data-a="close" aria-label="Close">×</button></div><div class="ov-b">All courses, audits, tickets and history in this browser will be removed.</div><div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn danger" data-a="doReset">Clear</button></div>`)},
+  reset(){if(!isAud())return;openModal(`<div class="ov-h"><h3>Clear all data?</h3><button class="x" data-a="close" aria-label="Close">×</button></div><div class="ov-b">All courses, audits, tickets and history in this browser will be removed.</div><div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn danger" data-a="doReset">Clear</button></div>`)},
   // sample courses show every SLA state; they sit beside real data and come out again on their own
   alertF(k){alertF=k;$('#alertPanel').outerHTML=alertPanel()},
   toggleAlerts(){listOpen.has('alerts')?listOpen.delete('alerts'):listOpen.add('alerts');$('#alertPanel').outerHTML=alertPanel()},
   toggleList(k){listOpen.has(k)?listOpen.delete(k):listOpen.add(k);render()},
-  samples(){const had=S.courses.some(c=>c.sample);had?removeSamples():addSamples();save();render();
+  samples(){if(!isAud())return;const had=S.courses.some(c=>c.sample);had?removeSamples():addSamples();save();render();
     toast(had?'Samples removed':'Samples added · 8 courses, 7 tickets')},
-  doReset(){fresh();draft=null;lastImp=null;closeOv();go('courses');toast('All data cleared')},
+  doReset(){if(!isAud())return closeOv();fresh();draft=null;lastImp=null;closeOv();go('courses');toast('All data cleared')},
   startAudit(id,re){const c=course(id);c.lockedBy=user.name;c.lockedAt=Date.now();if(!re)c.auditorStatus='In Progress';
     const last=re?S.audits.filter(a=>a.courseId===id&&a.checklist?.length===8).sort((a,b)=>b.date-a.date)[0]?.checklist:null;
     const base=last?last.map(v=>v==='N/A'?'N/A':'Yes'):null;
@@ -1184,7 +1189,7 @@ const A={
   // a re-audit that finds a No asks once before the healthy course turns Unhealthy
   confirmSame(){if(!draft)return closeOv();draft.same=true;closeOv();submitAudit()},
   confirmFail(){if(!draft)return closeOv();draft.ok=true;closeOv();submitAudit()},
-  escalate(id){const t=ticket(id);t.status='Escalated';t.escalatedAt=t.escalatedAt||Date.now();t.escalatedBy=user.name;tlog(t,'Escalated');save();
+  escalate(id){const t=ticket(id);t.status='Escalated';t.escalatedAt=t.escalatedAt||Date.now();t.escalatedBy=user.name;tlog(t,'Escalated');save();refreshMine();
     // go straight on to the fix date: the card opens its form in place
     const prev=editingT;editingT=id;if(prev&&prev!==id)swapSelm(prev,false);
     swapCard(id,true)?.querySelector('.tk-form')?.classList.add('enter');toast(isOverdue(t)?`${id} escalated · the fix date is overdue`:`${id} escalated · ${slaLeft(t)}`)},
@@ -1206,7 +1211,7 @@ const A={
     swapSelm(id,true)},
   cancelT(){const id=editingT;if(!id)return;$(`#note-${id}`)&&($(`#note-${id}`).value='');$(`#fix-${id}`)&&($(`#fix-${id}`).value=ticket(id).fixDate?toInput(ticket(id).fixDate):'');editingT=null;swapSelm(id,false)},
   undoEsc(id){const t=ticket(id);if(!canUndoEsc(t))return toast(`${id} can't be undone now`);
-    t.status='New';t.escalatedBy=null;tlog(t,'Escalation undone','Back to New');editingT=null;save();
+    t.status='New';t.escalatedBy=null;tlog(t,'Escalation undone','Back to New');editingT=null;save();refreshMine();
     swapCard(id,true);toast(`${id} is back to New`)},
   takeOver(id){const t=ticket(id);
     openModal(`<div class="ov-h"><h3>Take over ${id}?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
@@ -1214,7 +1219,7 @@ const A={
       <div class="ov-f"><button class="btn" data-a="close">Back</button><button class="btn primary" data-a="doTakeOver" data-id="${id}">Take over</button></div>`)},
   doTakeOver(id){const t=ticket(id);closeOv();
     if(!WORKING.includes(t.status)||mine(t))return toast(`${id} has changed; nothing to take over`);
-    const from=t.escalatedBy;t.escalatedBy=user.name;tlog(t,'Taken over',`from ${from}`);save();
+    const from=t.escalatedBy;t.escalatedBy=user.name;tlog(t,'Taken over',`from ${from}`);save();refreshMine();
     // the new owner goes straight to the form, like after escalating
     const prev=editingT;editingT=id;if(prev&&prev!==id)swapSelm(prev,false);
     swapCard(id,true)?.querySelector('.tk-form')?.classList.add('enter');toast(`${id} is now yours`)},
@@ -1358,12 +1363,24 @@ S.courses.forEach(c=>{if(c.type==='E-Learning')c.type='Learning Plan'});
 S.tickets.forEach(t=>{if(!t.createdBy)t.createdBy=S.logs.find(l=>l.ticketId===t.id&&l.action==='Added after audit')?.actor||S.audits.find(a=>a.id===t.auditId)?.auditor||''});
 // fix date moves no longer wait for approval; drop any request saved by the earlier version
 S.tickets.forEach(t=>{delete t.fixReq});
-// older data only recorded passed audits as "last audited"; take the latest audit of any result
-S.courses.forEach(c=>{const a=S.audits.filter(x=>x.courseId===c.id).sort((x,y)=>y.date-x.date)[0];
-  if(a&&(!c.lastAudited||a.date>c.lastAudited)){c.lastAudited=a.date;c.lastAuditor=a.auditor}});
+// last audited is the latest full audit of any result; approving fixes doesn't count, which also corrects older data
+S.courses.forEach(c=>{const a=S.audits.filter(x=>x.courseId===c.id&&x.note!==REVERIFY).sort((x,y)=>y.date-x.date)[0];
+  if(a){c.lastAudited=a.date;c.lastAuditor=a.auditor}});
 // an unfinished audit form does not survive a reload, so release its lock
 S.courses.forEach(c=>{if(c.lockedBy){c.lockedBy=null;c.lockedAt=null;if(!openOf(c.id).length&&c.auditorStatus==='In Progress')c.auditorStatus='Pending'}});
 // a reload in the same tab stays signed in; a new tab starts at the sign-in page
 try{user=USERS.find(u=>u.id===sessionStorage.getItem(LOGIN_KEY))||null}catch(e){user=null}
+// another tab saved: take its data and redraw, so tabs don't overwrite each other's work
+window.addEventListener('storage',e=>{if(e.key!==KEY)return;
+  let next=null;try{next=e.newValue?JSON.parse(e.newValue):null}catch(err){return}
+  S=next&&next.seq?next:{courses:[],audits:[],tickets:[],logs:[],imports:[],seq:{t:1001,a:1,c:1,l:1}};S.imports=S.imports||[];
+  if(draft&&!course(draft.courseId))draft=null;
+  if(editingT&&!ticket(editingT))editingT=null;
+  if(focusT&&!ticket(focusT))closeFocus();
+  if(rejecting&&!ticket(rejecting))rejecting=null;
+  if(view.name==='course'&&!course(view.id))view={name:'courses'};
+  const el=document.activeElement,id=el?.id,from=el?.selectionStart,to=el?.selectionEnd;
+  render();
+  const again=id&&document.getElementById(id);if(again&&again!==document.activeElement){again.focus({preventScroll:true});try{if(from!=null)again.setSelectionRange(from,to)}catch(err){}}});
 render();
 })();
