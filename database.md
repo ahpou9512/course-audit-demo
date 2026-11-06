@@ -254,7 +254,7 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 
 | 对象 | Action |
 |---|---|
-| 课程 | `Course registered`、`Course discontinued`、`Course restored`、`Re-audit queued`、`Pricing updated`、`Audience updated`、`Course info updated` |
+| 课程 | `Course registered`、`Course discontinued`、`Course restored`、`Pricing updated`、`Audience updated`、`Course info updated` |
 | Audit | `Audit passed`、`Audit failed`、`Criteria updated`、`Re-verification approved` |
 | Ticket（Auditor） | `Ticket created`、`Added after audit`、`Edited by auditor`、`Ticket removed`、`Ticket closed`、`Retest failed`、`Cancellation rejected` |
 | Ticket（SELM） | `Escalated`、`Escalation undone`、`Fix date set`、`Fix date changed`、`Status → In Progress`、`Note added`、`Marked resolved`、`Proposed cancellation`、`Taken back`、`Taken over` |
@@ -268,12 +268,13 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 - Audit 提交成功才写入课程的 `DoceboPrice` 和 `COURSE_AUDIENCES`；验证失败或取消都不改课程。
 - 还有 ticket 没关时，这次 audit 至少要留一个 `No`。
 - 全部 ticket 关闭后，自动建一次 re-verification audit（`IsReverification = true`），答案全部是 `Yes`，原本 `N/A` 的保持 `N/A`。
-- 课程等 audit 也是 7 天：停在 Pending audit 超过 7 天就算超时。从课程新增、restore 或排入 re-audit（`COURSES.CreatedAt` 或 `ACTIVITY_LOGS` 里最新的 `Course registered`、`Course restored`、`Re-audit queued`）开始算，不用新字段。
+- 课程等 audit 也是 7 天：停在 Pending audit 超过 7 天就算超时。从课程新增或 restore（`COURSES.CreatedAt` 或 `ACTIVITY_LOGS` 里最新的 `Course registered`、`Course restored`）开始算，不用新字段。
 - Ticket 的 SLA 有两段，都是 7 天：`Status = New` 且 `SlaStartAt`（空的话用 `CreatedAt`）超过 7 天（还没 escalate）；`Status` 是 `Escalated` 或 `Retest Failed`、`FixDate` 是空的、而且 `EscalatedAt` 超过 7 天（还没填 fix date）。这两种在 Dashboard 分开计数、分开提醒。
 - 一门课同一时间只能有一个人 audit（`LockedById`）；中途离开或取消就放弃这次 audit、解除锁定，不留记录；锁太久没提交（例如超过一天）也要自动解除。
 - 这一轮还有 open ticket 时，Auditor 可以补开 ticket：`AuditId` 是这一轮的 audit，`CreatedById` 是补开的人，`ACTIVITY_LOGS` 记 `Added after audit`。
 - Ticket 还是 `New`（SELM 还没 escalate）时，Auditor 可以改 Category 和 Detail（记 `Edited by auditor`），或直接删除；删除会在 `ACTIVITY_LOGS` 留一笔 `Ticket removed`，`AuditId` 指向那一轮。这一轮最后一张 open ticket 不能删。
 - 所有动作都要在服务器端、用**当下**的状态再检查一次（例如 `DELETE ... WHERE Status = 'New'`，或 EF Core 的 `RowVersion`），避免画面是旧的、别人刚好已经改了状态。
+- 只有 Auditor 可以 re-audit，按下后直接打开 8 项 criteria；Course Owner 不能排入 re-audit。
 - Re-audit 时课程保持 `Healthy`，直到提交结果；re-audit 要有 `No`，或有答案改变（例如 Yes → N/A）才能提交；完全没变就取消，不留记录。有 `No` 提交后变成 `Unhealthy`，只改成 N/A 的话保持 `Healthy`。
 - 只有 escalate 的 SELM（`EscalatedById`）可以更新、Resolve 或 Cancel 那张 ticket；只有 Auditor 可以 Approve 或 Reject。
 - Pricing 和 Audience 每次修改都要在 `ACTIVITY_LOGS` 记一笔（`Pricing updated` / `Audience updated`，`Detail` 写 `旧值 → 新值`），`AuditId` 指向这一轮的 audit，画面上显示在那一轮 audit 的修改记录里。

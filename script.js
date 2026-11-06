@@ -40,7 +40,7 @@ const openOf=cid=>ticketsOf(cid).filter(t=>t.status!==CLOSED);
 // two 7-day clocks: raised -> escalated, then escalated -> fix date set
 const slaFrom=t=>t.status==='New'?t.slaStart||t.createdAt:(t.status==='Escalated'||t.status==='Retest Failed')&&!t.fixDate?t.escalatedAt:null;
 const isOverdue=t=>{const s=slaFrom(t);return !!s&&Date.now()-s>7*DAY};
-// a course waiting for audit also has 7 days, counted from when it was added, restored or queued for re-audit
+// a course waiting for audit also has 7 days, counted from when it was added or restored; older data may also say it was queued for re-audit
 const pendingSince=c=>Math.max(c.createdAt||0,...S.logs.filter(l=>l.courseId===c.id&&['Course registered','Course restored','Re-audit queued'].includes(l.action)).map(l=>l.ts));
 const auditLate=c=>stage(c)==='audit'&&Date.now()-pendingSince(c)>7*DAY;
 function auditFlag(c){if(stage(c)!=='audit')return '';const d=daysSince(pendingSince(c));
@@ -269,7 +269,7 @@ function vCourse(){
   let btn='';
   if(c.lockedBy&&c.lockedBy!==user.name)btn=`<span class="muted small">🔒 Being audited by ${esc(c.lockedBy)}</span>`;
   else if(st==='audit'&&isAud()&&!c.lockedBy)btn=`<button class="btn primary" data-a="startAudit" data-id="${c.id}">Start audit</button>`;
-  else if(st==='healthy'&&!c.lockedBy&&(isAud()||isOwner()))btn=`<button class="btn" data-a="reaudit" data-id="${c.id}">${isAud()?'Re-audit':'Queue re-audit'}</button>`;
+  else if(st==='healthy'&&!c.lockedBy&&isAud())btn=`<button class="btn" data-a="reaudit" data-id="${c.id}">Re-audit</button>`;
   else if(st==='audit'&&!isAud())btn=`<span class="muted small">Waiting for an auditor</span>`;
   const stats=`<div class="stats"><span>Audits <b>${runs.length}</b></span><span>Last audited <b>${fmtD(c.lastAudited)}</b>${c.lastAudited?` (${daysSince(c.lastAudited)}d ago)`:''}</span>
       <span>By <b>${esc(c.lastAuditor||'—')}</b></span><span id="priceBox">${priceView(c)}</span><span id="audBox">${audView(c)}</span></div>`;
@@ -1133,11 +1133,7 @@ const A={
     <div class="ov-f"><button class="btn" data-a="close">Keep discontinued</button><button class="btn primary" data-a="doRestoreCourse" data-id="${id}">Restore course</button></div>`)},
   doRestoreCourse(id){const c=course(id),same=sameCourses(c);c.health='Pending Audit';c.auditorStatus='Pending';c.cycleAuditId=null;
     log({courseId:id,action:'Course restored',detail:`Back in Pending audit${same.length?`; restored anyway, same as ${same.map(x=>x.code).join(', ')}`:''}`});save();closeOv();render();toast(`${c.code} restored · Pending audit`)},
-  reaudit(id){const c=course(id);if(isAud())return A.startAudit(id,true);
-    openModal(`<div class="ov-h"><h3>Queue re-audit?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
-    <div class="ov-b"><p style="margin:0">Are you sure you want to re-audit <b>${esc(c.code)}</b> · ${esc(c.name)}? It goes back to the Pending audit queue for an auditor to check again.</p></div>
-    <div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="doReaudit" data-id="${c.id}">Queue re-audit</button></div>`)},
-  doReaudit(id){closeOv();const c=course(id);c.auditorStatus='Pending';log({courseId:c.id,action:'Re-audit queued',detail:''});save();render();toast('Queued for re-audit')},
+  reaudit(id){if(isAud())A.startAudit(id,true)},
   // a re-audit that finds a No asks once before the healthy course turns Unhealthy
   confirmFail(){if(!draft)return closeOv();draft.ok=true;closeOv();submitAudit()},
   escalate(id){const t=ticket(id);t.status='Escalated';t.escalatedAt=t.escalatedAt||Date.now();t.escalatedBy=user.name;tlog(t,'Escalated');save();
