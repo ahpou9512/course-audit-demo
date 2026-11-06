@@ -294,6 +294,41 @@ td>.aud-sla{display:block;margin-top:4px}
 .imp-fact b{font-size:20px}
 .imp-fact span{font-size:12px;color:var(--muted)}
 .imp-hist{align-self:flex-start}
+.modal{transition:width .22s ease}
+.modal.swap{animation:none}
+.modal.swap>*{animation:fadeIn .2s ease-out}
+.imp-banner{animation:formIn .3s ease-out}
+.imp-live{display:flex;flex-direction:column;gap:12px;padding:6px 2px}
+.imp-step{display:flex;align-items:center;gap:10px;font-weight:600}
+.imp-step small{margin-left:auto;font-size:12.5px;font-weight:500;color:var(--muted)}
+.imp-step i{position:relative;flex:none;width:18px;height:18px;border-radius:50%;border:2px solid var(--line)}
+.imp-step.wait{color:var(--muted);font-weight:500}
+.imp-step.active i{border-color:var(--accent-soft);border-top-color:var(--accent);animation:impSpin .8s linear infinite}
+.imp-step.done i{background:var(--ok);border-color:var(--ok);animation:impPop .25s ease-out}
+.imp-step.bad i{background:var(--bad);border-color:var(--bad);animation:impPop .25s ease-out}
+.imp-step.done i::after{content:"";position:absolute;left:4px;top:1px;width:4px;height:8px;border:solid var(--surface);border-width:0 2px 2px 0;transform:rotate(45deg)}
+.imp-step.bad i::after{content:"!";position:absolute;inset:0;display:grid;place-items:center;color:var(--surface);font-size:12px;font-weight:700;font-style:normal}
+.imp-step.bad small{color:var(--bad);font-weight:600}
+.imp-run{gap:8px;padding:26px 24px}
+.imp-run h3,.imp-done h3{margin:0;font-size:17px}
+.imp-run p,.imp-done p{margin:0;overflow-wrap:anywhere}
+.imp-bar{height:8px;margin-top:8px;border-radius:999px;background:var(--surface-2);overflow:hidden}
+.imp-bar i{display:block;height:100%;border-radius:inherit;background:var(--accent);transform:scaleX(0);transform-origin:left;transition:transform 60ms linear}
+.imp-run-row{display:flex;justify-content:space-between;gap:12px;font-size:13px;color:var(--muted)}
+.imp-run-row b{color:var(--fg)}
+.imp-done{align-items:center;text-align:center;gap:6px;padding:26px 24px 18px}
+.imp-tick{width:56px;height:56px;margin-bottom:6px;fill:none;stroke:var(--ok);stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.imp-tick circle{stroke-dasharray:151;animation:impDraw .5s ease-out both;transform:rotate(-90deg);transform-origin:center}
+.imp-tick path{stroke-dasharray:36;animation:impDraw .3s ease-out .4s both}
+.imp-done .imp-facts{width:100%;margin-top:12px;text-align:left}
+.imp-done .imp-fact{animation:rowIn .35s ease-out .5s both}
+.imp-done .imp-fact:nth-child(2){animation-delay:.58s}
+.imp-done .imp-fact:nth-child(3){animation-delay:.66s}
+.imp-done .imp-fact:nth-child(4){animation-delay:.74s}
+.imp-done + .ov-f{justify-content:center}
+@keyframes impSpin{to{transform:rotate(360deg)}}
+@keyframes impPop{from{transform:scale(.5)}}
+@keyframes impDraw{from{stroke-dashoffset:151}to{stroke-dashoffset:0}}
 .imp-banner{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px;border:1px solid var(--accent);border-radius:8px;background:var(--accent-soft);font-size:13.5px;overflow-wrap:anywhere}
 .imp-banner span{flex:1 1 200px;min-width:0}
 .imp-stop{margin:0;padding:10px 12px;border-radius:8px;background:var(--bad-bg);color:var(--bad);font-weight:500}

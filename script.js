@@ -103,7 +103,7 @@ function fresh(){S={courses:[],audits:[],tickets:[],logs:[],imports:[],seq:{t:10
 
 /* ---------- shell ---------- */
 let openHist=new Set(), openEdits=new Set(); // courses whose older audits are unfolded; audits whose criteria edits are listed
-let animTree=false, animatedFor=null, enterAnim=true, rowAnim=true, flashId=null, editingT=null; // editingT: ticket whose SELM form is open
+let animTree=false, animatedFor=null, enterAnim=true, rowAnim=true, flashId=null, impFlash=null, impPending=null, editingT=null; // editingT: ticket whose SELM form is open
 // demo sign-in: choose a user, no password. A real sign-in belongs on the server
 const LOGIN_KEY='course-audit-demo-login';
 function vLogin(){return `<form class="login" id="loginForm" novalidate>
@@ -125,7 +125,7 @@ function render(){
   $('#view').innerHTML=({courses:vCourses,course:vCourse,dashboard:vDash,history:vHistory,team:vTeam,auditor:vAuditor})[view.name]();
   if(view.name==='course'&&draft)renderIssues();
   if(enterAnim){const v=$('#view');v.classList.remove('enter');void v.offsetWidth;v.classList.add('enter');enterAnim=false}
-  rowAnim=false;flashId=null;
+  rowAnim=false;flashId=null;impFlash=null;
   if(animTree)setTimeout(()=>$('#tree')?.classList.remove('anim'),1600);
   paintFocus();
 }
@@ -245,7 +245,7 @@ function courseRows(){
   // one page of PAGE rows at a time
   rowTotal=list.length;page=Math.min(page,Math.max(1,Math.ceil(list.length/PAGE)));
   const pageList=list.slice((page-1)*PAGE,page*PAGE);
-  return `  ${list.length?pageList.map((c,i)=>{const [txt,me]=nextStep(c), shown=shownOf(c), hit=!tkF||shown.some(tkHit), fade=hit&&(catFilter||tkF||myF&&isSelm());return `<tr class="click${hit?'':' dim'}${rowAnim?' row-in':''}${c.id===flashId?' flash':''}" style="--i:${Math.min(i,12)}" data-a="open" data-id="${c.id}" tabindex="0">
+  return `  ${list.length?pageList.map((c,i)=>{const [txt,me]=nextStep(c), shown=shownOf(c), hit=!tkF||shown.some(tkHit), fade=hit&&(catFilter||tkF||myF&&isSelm());return `<tr class="click${hit?'':' dim'}${rowAnim?' row-in':''}${c.id===flashId||impFlash&&c.importId===impFlash?' flash':''}" style="--i:${Math.min(i,12)}" data-a="open" data-id="${c.id}" tabindex="0">
     <td><div class="cname"><span class="mono">${esc(c.code)}</span><b>${esc(c.name)}</b></div></td>
     <td>${pill(healthLabel(c))}${auditFlag(c)}</td>
     <td>${shown.length?`<div class="catlist">${shown.map(t=>{const done=t.status===CLOSED,dis=t.closedAs==='Cancelled'||t.closedAs==='Discontinued';
@@ -661,7 +661,9 @@ function vHistory(){
 
 /* ---------- modals ---------- */
 function openModal(html){$('#overlay').innerHTML=`<div class="scrim"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`}
-function closeOv(){$('#overlay').innerHTML=''}
+function closeOv(){$('#overlay').innerHTML='';
+  // the list behind an import only changes once the result has been shown
+  if(impPending){impFlash=impPending;impPending=null;go('courses')}}
 
 /* ---------- actions ---------- */
 function closeCycle(c){
@@ -830,13 +832,13 @@ function checkImport(kind,rows){
     ready.push(x)}
   skipped.sort((a,b)=>a.row-b.row);
   return {ready,skipped}}
-function impChooser(){openModal(`<div class="ov-h"><h3>Import courses</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+function impChooser(){impModal(`<div class="ov-h"><h3>Import courses</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
   <div class="ov-b"><p class="muted" style="margin:0">Which courses are in your file?</p>
     <button class="imp-kind" data-a="impKind" data-id="new"><b>New courses</b><span>Not audited yet. They go to Pending audit and the 7-day clock starts.</span></button>
     <button class="imp-kind" data-a="impKind" data-id="old"><b>Existing courses</b><span>Already audited. Their last result and open issues come with them.</span></button>${impHistLink()}</div>
   <div class="ov-f"><button class="btn" data-a="close">Cancel</button></div>`)}
 function impUpload(kind,msg){imp={kind};const isNew=kind==='new';
-  openModal(`<div class="ov-h"><h3>Import ${isNew?'new':'existing'} courses</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+  impModal(`<div class="ov-h"><h3>Import ${isNew?'new':'existing'} courses</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
   <div class="ov-b"><div class="imp-steps"><b>1.</b> Fill in the template. Keep its column names.<br><b>2.</b> Upload it. If any row has a problem, nothing is imported until the file is fixed.</div>
     <div class="imp-dl"><button class="btn sm" data-a="impFile" data-id="${kind}:template">Download template</button><button class="btn sm" data-a="impFile" data-id="${kind}:sample">Download sample file</button></div>
     <p class="muted small" style="margin:0">${isNew?'Columns: Course Code, Course Name, Type.':'One row per course. A course with several issues gets one more row per issue, with the same Course Code. Columns: course details and status, the 8 criteria, Audit Owner, Audit Date, Audit Note, Issue, Category.'}</p>
@@ -850,22 +852,19 @@ function impPreview(){const {kind,file,ready,skipped}=imp,n=ready.length,isNew=k
     const courses=new Set(skipped.map(s=>s.code||`row${s.row}`)).size,byCol=new Map();
     skipped.forEach(s=>byCol.set(s.col,(byCol.get(s.col)||0)+1));
     const cut=skipped.length>IMP_PROBLEMS;
-    openModal(`<div class="ov-h"><h3>Can't import ${esc(file)}</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+    impModal(`<div class="ov-h"><h3>Can't import ${esc(file)}</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
     <div class="ov-b"><div class="imp-stop"><b>${skipped.length} problem${skipped.length>1?'s':''} in ${courses} course${courses>1?'s':''}.</b> Nothing was imported.</div>
       ${byCol.size>1?`<div class="imp-cols"><span class="muted small">Columns with problems</span>${[...byCol].sort((a,b)=>b[1]-a[1]).map(([c,n])=>`<span class="imp-col">${esc(c)} <b>${n}</b></span>`).join('')}</div>`:''}
       <div class="tbl-wrap imp-probs"><table class="imp-tbl"><thead><tr><th>Row</th><th>Course</th><th>Column</th><th>In the file</th><th>Problem</th></tr></thead><tbody>${skipped.slice(0,IMP_PROBLEMS).map(s=>`<tr><td class="imp-row">${s.row}</td><td>${s.code?`<span class="mono">${esc(s.code)}</span>`:'<span class="muted">No code</span>'}${s.name?`<div class="muted small">${esc(s.name)}</div>`:''}</td><td><b>${esc(s.col)}</b></td><td>${s.val?`<span class="imp-val">${esc(s.val.length>80?s.val.slice(0,80)+'…':s.val)}</span>`:'<span class="imp-val blank">Blank</span>'}</td><td>${esc(s.why)}</td></tr>`).join('')}</tbody></table></div>
       ${cut?`<p class="muted small" style="margin:0">Showing the first ${IMP_PROBLEMS} of ${skipped.length}. </p>`:''}</div>
     <div class="ov-f"><button class="btn" data-a="close">Close</button><button class="btn primary" data-a="impAgain">Choose another file</button></div>`);
     $('.modal').classList.add('imp-wide','imp-errors');return}
-  const failed=ready.filter(x=>x.failed),gone=ready.filter(x=>x.disc).length,pass=n-failed.length-gone,tix=failed.reduce((s,x)=>s+x.issues.length,0);
-  const facts=isNew?`<div class="imp-fact"><b>${n}</b><span>Pending audit</span></div>`
-    :`<div class="imp-fact"><b>${pass}</b><span>Healthy</span></div><div class="imp-fact"><b>${failed.length}</b><span>Unhealthy</span></div>${gone?`<div class="imp-fact"><b>${gone}</b><span>Discontinued</span></div>`:''}<div class="imp-fact"><b>${tix}</b><span>Tickets to open</span></div>`;
   const result=x=>isNew?pill('Pending Audit'):pill(x.disc?'Discontinued':x.failed?'Unhealthy':'Healthy')+(x.failed?` <span class="muted small">${x.issues.length} issue${x.issues.length>1?'s':''}</span>`:'');
   // what deserves a look comes first, so it isn't lost past the first rows of a long file
   const warnsOf=x=>[x.warn&&`Same name as ${x.warn}`,x.dupes&&`Same issue listed more than once. One ticket opens.`].filter(Boolean);
   const warned=ready.filter(x=>warnsOf(x).length),shown=[...warned,...ready.filter(x=>!warnsOf(x).length)];
-  openModal(`<div class="ov-h"><h3>Check ${esc(file)}</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
-  <div class="ov-b"><div class="imp-facts">${facts}</div>
+  impModal(`<div class="ov-h"><h3>Check ${esc(file)}</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+  <div class="ov-b"><div class="imp-facts">${impFacts(kind,ready)}</div>
     ${n?`<div class="imp-sec"><h4>Ready to import</h4>${warned.length?`<p class="warn-line" style="margin:0">${warned.length} course${warned.length>1?'s have':' has'} a warning, listed first. ${warned.length>1?'They':'It'} can still be imported.</p>`:''}<div class="tbl-wrap"><table class="imp-tbl"><thead><tr><th>Course</th><th>Name</th><th>Type</th><th>Result</th></tr></thead><tbody>${shown.slice(0,IMP_SHOW).map(x=>`<tr><td>${esc(x.code)}</td><td>${esc(x.name)}${warnsOf(x).map(w=>`<div class="warn-line">${esc(w)}</div>`).join('')}</td><td>${esc(x.type)}</td><td>${result(x)}</td></tr>`).join('')}</tbody></table></div>${more(n)}</div>`:'<p style="margin:0">This file has no courses.</p>'}
     <span class="err" id="impErr"></span></div>
   <div class="ov-f"><button class="btn" data-a="impAgain">Choose another file</button><button class="btn primary" data-a="impSave"${n?'':' disabled'}>Import ${n} course${n===1?'':'s'}</button></div>`);
@@ -910,16 +909,49 @@ async function impDownload(kind,what){
   if(dl){try{await dl.save({filename:name,data:new Blob([data])})}catch(e){if(e?.code!=='declined')toast("That file couldn't be saved here.")}return}
   if(window.claude?.use)return toast("Downloads aren't available in this view.");
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+// the import box changes its contents in place, so moving between steps doesn't flash the whole box
+function impModal(html){const m=$('.modal');if(!m)return openModal(html);m.className='modal swap';m.innerHTML=html}
+const impCalm=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
+const impWait=ms=>impCalm()?Promise.resolve():new Promise(r=>setTimeout(r,ms));
+const impStep=(state,text,sub='')=>`<div class="imp-step ${state}"><i aria-hidden="true"></i><span>${esc(text)}</span>${sub?`<small>${esc(sub)}</small>`:''}</div>`;
+function impFacts(kind,ready){const n=ready.length;if(kind==='new')return `<div class="imp-fact"><b>${n}</b><span>Pending audit</span></div>`;
+  const failed=ready.filter(x=>x.failed),gone=ready.filter(x=>x.disc).length,pass=n-failed.length-gone,tix=failed.reduce((s,x)=>s+x.issues.length,0);
+  return `<div class="imp-fact"><b>${pass}</b><span>Healthy</span></div><div class="imp-fact"><b>${failed.length}</b><span>Unhealthy</span></div>${gone?`<div class="imp-fact"><b>${gone}</b><span>Discontinued</span></div>`:''}<div class="imp-fact"><b>${tix}</b><span>Tickets to open</span></div>`}
 async function impRead(input){const file=input.files[0],kind=imp?.kind;if(!file||!kind)return;
   const fail=m=>impUpload(kind,m);
   if(!/\.(xlsx|csv)$/i.test(file.name))return fail('Choose an .xlsx or .csv file.');
-  $('#impErr').textContent='';$('.imp-drop b').textContent='Reading…';
+  impModal(`<div class="ov-h"><h3>Checking ${esc(file.name)}</h3></div><div class="ov-b"><div class="imp-live" id="impLive" role="status">${impStep('active','Reading file')}${impStep('wait','Checking each row')}</div></div><div class="ov-f"><button class="btn" data-a="close">Cancel</button></div>`);
+  // closing the box cancels the rest
+  const live=()=>$('#impLive');
   let rows;
-  try{rows=await readRows(file)}catch(e){return fail(e?.message==='load'?"Couldn't load the Excel reader. Check your connection, or save the file as .csv.":"This file couldn't be read. Save it again as .xlsx or .csv.")}
-  if(!imp||imp.kind!==kind)return;
+  try{[rows]=await Promise.all([readRows(file),impWait(550)])}catch(e){if(live())fail(e?.message==='load'?"Couldn't load the Excel reader. Check your connection, or save the file as .csv.":"This file couldn't be read. Save it again as .xlsx or .csv.");return}
+  if(!live())return;
+  const count=rows.filter(r=>r.some(v=>impText(v))).length-1,label=`${Math.max(count,0)} row${count===1?'':'s'}`;
+  live().innerHTML=impStep('done','Reading file',label)+impStep('active','Checking each row');
+  await impWait(550);
+  if(!live())return;
   const res=checkImport(kind,rows);
   if(res.fatal)return fail(res.fatal);
+  live().innerHTML=impStep('done','Reading file',label)+impStep(res.skipped.length?'bad':'done','Checking each row',res.skipped.length?`${res.skipped.length} problem${res.skipped.length>1?'s':''}`:'No problems');
+  await impWait(320);
+  if(!live())return;
   imp={kind,file:file.name,...res};impPreview()}
+// the data is already saved when this starts; it shows the import happening, and closing the box only skips to the result
+function impRun(bid,kind,file,ready){const n=ready.length,plural=`course${n===1?'':'s'}`;
+  const tix=ready.reduce((s,x)=>s+(x.failed?x.issues.length:0),0);
+  const done=()=>{if(!$('#impRun'))return;
+    impModal(`<div class="ov-b imp-done" role="status"><svg class="imp-tick" viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24"/><path d="M15 27l8 8 15-16"/></svg><h3>${n} ${plural} imported</h3><p class="muted small">${esc(file)}</p><div class="imp-facts">${impFacts(kind,ready).replace('Tickets to open','Tickets opened')}</div></div>
+    <div class="ov-f"><button class="btn primary" data-a="impDone" data-id="${bid}">View courses</button></div>`);$('[data-a=impDone]')?.focus()};
+  impModal(`<div class="ov-b imp-run" id="impRun" role="status"><h3>Importing ${n} ${plural}</h3><p class="muted small">${esc(file)}</p><div class="imp-bar"><i id="impBar"></i></div><div class="imp-run-row"><span id="impPhase">Adding courses</span><span><b id="impN">0</b> of ${n}</span></div></div>`);
+  if(impCalm())return done();
+  const phases=kind==='new'?['Adding courses','Starting the audit clock']:['Adding courses','Saving audit results',tix?'Opening tickets':'Finishing up'];
+  const t0=Date.now(),dur=Math.min(1700,900+n*20);
+  // a timer, not an animation frame, so it still finishes if the tab is in the background
+  const tick=setInterval(()=>{if(!$('#impRun'))return clearInterval(tick);
+    const p=Math.min(1,(Date.now()-t0)/dur),e=1-(1-p)*(1-p);
+    $('#impBar').style.transform=`scaleX(${e})`;$('#impN').textContent=Math.round(e*n);
+    $('#impPhase').textContent=phases[Math.min(phases.length-1,Math.floor(p*phases.length))];
+    if(p>=1){clearInterval(tick);setTimeout(done,180)}},40)}
 
 // a whole import can be taken back until someone has worked on one of its courses, so nobody's work is removed by accident
 const canUndoImp=b=>isAud()||b.by===user.name;
@@ -970,8 +1002,9 @@ const A={
     const bid='I'+Date.now();ready.forEach(x=>importCourse(x,kind,file,bid));
     S.imports.push({id:bid,file,kind,by:user.name,ts:Date.now(),count:ready.length,undoneAt:null,undoneBy:null});
     try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){if(/quota/i.test(e?.name||'')){S=JSON.parse(snap);$('#impErr').textContent="There isn't enough browser storage for this many courses. Nothing was imported.";return}}
-    lastImp=bid;closeOv();imp=null;filter='all';search='';catFilter='';tkF='';auditedF='';myF=false;page=1;go('courses');
-    toast(`${ready.length} course${ready.length===1?'':'s'} imported`)},
+    lastImp=bid;impPending=bid;imp=null;filter='all';search='';catFilter='';tkF='';auditedF='';myF=false;page=1;
+    impRun(bid,kind,file,ready)},
+  impDone(){closeOv()},
   addCourse(){openModal(`<form id="addForm" novalidate style="display:contents"><div class="ov-h"><h3>Add a course</h3><button type="button" class="x" data-a="close" aria-label="Close">×</button></div>
     <div class="ov-b"><label class="field"><span class="req">Course code</span><input type="text" id="nCode" placeholder="e.g. ESSTGD04406"></label>
     <label class="field"><span class="req">Course name</span><input type="text" id="nName"></label>
