@@ -314,5 +314,5 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 这些不用放进数据库：
 
 - **登录：** demo 只选账号，没有密码。真网站要先确认是不是用公司的 SSO；用 SSO 的话 `USERS` 不用存密码，不用的话要加 ASP.NET Core Identity 的表。
-- **Clear all data 和 Add samples：** 只给 demo 用，真网站不要有这两个功能。
+- **Clear all data 和 Add overdue testing：** 只给 demo 用，真网站不要有这两个功能。
 - **分页同步：** demo 的资料存在浏览器，靠 `storage` 事件同步分页。真网站由服务器保存，`LockedById` 要在服务器端检查，才能避免两个人同时 audit 同一门课。

@@ -622,7 +622,7 @@ function vDash(){
   const tm=(v,l,t,k)=>`<button class="metric" data-a="dashGo" data-id="t:${k}" style="--tone:var(${t})"><b>${v}</b><span>${l}</span></button>`;
   const from=rptFrom??dayStart(Date.now()-6*DAY), to=rptTo??dayStart(Date.now());
   const inR=S.logs.filter(l=>l.ts>=from&&l.ts<to+DAY), cnt=a=>inR.filter(l=>l.action===a).length;
-  return `<div class="head"><h2>Dashboard</h2>${isAud()?`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-a="samples">${S.courses.some(c=>c.sample)?'Remove samples':'Add samples'}</button><button class="btn sm" data-a="reset">Clear all data</button></div>`:''}</div>
+  return `<div class="head"><h2>Dashboard</h2>${isAud()?`<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-a="samples">${S.courses.some(c=>c.sample)?'Remove overdue testing':'Add overdue testing'}</button><button class="btn sm" data-a="reset">Clear all data</button></div>`:''}</div>
   <span class="sec-label">Courses</span>
   <div class="metric hero" style="--tone:var(--accent)"><button class="hero-link" data-a="dashGo" data-id="c:all"><b>${cs.all}</b><span>Active courses</span></button><small class="hero-sla${lateAud.length?' bad':''}">${lateAud.length} not audited in ${AUDIT_DAYS}d</small>${foldBtn('courses')}</div>
   <div class="fold-box${fold.courses?' shut':''}" id="fold-courses"><div class="metrics">${m(cs.healthy,'Healthy','--ok','healthy')}${m(cs.issues,'Unhealthy','--bad','issues')}${m(cs.verify,'Ready to revalidate','--pv','verify')}${m(cs.audit,'Pending audit','--warn','audit')}</div></div>
@@ -745,23 +745,23 @@ function addSamples(){const now=Date.now(),ago=d=>now-d*DAY,price=299;
       if(x.esc)at(x.esc,x.by,'Escalated','');
       (x.moves||[]).forEach(m=>{at(m.d,x.by,'Fix date changed',`${week(ago(m.from))} → ${week(ago(m.to))} (${fmtD(ago(m.to))})`);at(m.d,x.by,'Note added',m.note);t.notes.push({ts:ago(m.d),by:x.by,text:m.note})})})};
   // waiting for their first audit: one past the deadline, one still inside it
-  [['SAMPLE-104','Sample: not audited yet',35],['SAMPLE-105','Sample: added recently',2]].forEach(([code,name,d])=>{
+  [['TEST-104','Test: not audited yet',35],['TEST-105','Test: added recently',2]].forEach(([code,name,d])=>{
     const c={id:'C'+S.seq.c++,sample:true,code,name,type:'ILT',price:null,audience:'',health:'Pending Audit',auditorStatus:'Pending',auditCount:0,lastAudited:null,lastAuditor:null,lockedBy:null,lockedAt:null,cycleAuditId:null,createdAt:ago(d)};
     S.courses.push(c);log({ts:ago(d),actor:'Rick',courseId:c.id,action:'Course registered',detail:'Manual entry'})});
   // Healthy courses for the Over 180 days ago filter: two past it, one still inside it
-  [['SAMPLE-106','Sample: audited 200 days ago',200],['SAMPLE-107','Sample: audited 300 days ago',300],['SAMPLE-108','Sample: audited 170 days ago',170]].forEach(([code,name,d])=>{
+  [['TEST-106','Test: audited 200 days ago',200],['TEST-107','Test: audited 300 days ago',300],['TEST-108','Test: audited 170 days ago',170]].forEach(([code,name,d])=>{
     const c={id:'C'+S.seq.c++,sample:true,code,name,type:'ILT',price,audience:'Partner',health:'Healthy',auditorStatus:'Completed',auditCount:1,lastAudited:ago(d),lastAuditor:'Rick',lockedBy:null,lockedAt:null,cycleAuditId:null,createdAt:ago(d+5)};
     S.courses.push(c);S.audits.push({id:'A'+S.seq.a++,courseId:c.id,date:ago(d),result:'Passed',auditor:'Rick',checklist:CRITERIA.map(()=>'Yes'),price,audience:'Partner',issues:[],note:''});
     log({ts:ago(d),actor:'Rick',courseId:c.id,action:'Audit passed',detail:'Iteration 1'})});
-  addCourse('SAMPLE-101','Sample: not escalated yet',12,[
+  addCourse('TEST-101','Test: not escalated yet',12,[
     {cat:'Pricing',desc:'Price in the catalog is out of date',status:'New',raised:12},
     {cat:'Content',desc:'Lab guide link is broken',status:'New',raised:9},
     {cat:'Course Setup',desc:'Wrong audience on the course page',status:'New',raised:3}]);
-  addCourse('SAMPLE-102','Sample: escalated, no fix date',15,[
+  addCourse('TEST-102','Test: escalated, no fix date',15,[
     {cat:'Edutube',desc:'Video 3 does not play',status:'Escalated',raised:15,esc:10,by:'Gary'},
     {cat:'CD PDF',desc:'PDF is missing chapter 4',status:'Escalated',raised:11,esc:8,by:'Jocelyn'},
     {cat:'IT issue',desc:'Login page times out',status:'Escalated',raised:4,esc:2,by:'Gary'}]);
-  addCourse('SAMPLE-103','Sample: fix date moved and missed',20,[
+  addCourse('TEST-103','Test: fix date moved and missed',20,[
     {cat:'Learning Plan Setup',desc:'Modules are in the wrong order',status:'In Progress',raised:20,esc:18,by:'Gary',first:12,fix:4,
       moves:[{d:11,from:12,to:7,note:'Vendor needs more time'},{d:5,from:7,to:4,note:'Waiting for the new content'}]}]);
 }
@@ -1142,12 +1142,12 @@ const A={
   clearF(){search='';catFilter='';tkF='';auditedF='';filter='all';myF=false;
     $('#search').value='';['statusF','catFilter','auditedF'].forEach(id=>{$('#'+id).value='';$('#'+id).classList.remove('on')});refreshRows()},
   reset(){if(!isAud())return;openModal(`<div class="ov-h"><h3>Clear all data?</h3><button class="x" data-a="close" aria-label="Close">×</button></div><div class="ov-b">All courses, audits, tickets and history in this browser will be removed.</div><div class="ov-f"><button class="btn" data-a="close">Cancel</button><button class="btn danger" data-a="doReset">Clear</button></div>`)},
-  // sample courses show every SLA state; they sit beside real data and come out again on their own
+  // overdue testing courses show every SLA state; they sit beside real data and come out again on their own
   alertF(k){alertF=k;$('#alertPanel').outerHTML=alertPanel()},
   toggleAlerts(){listOpen.has('alerts')?listOpen.delete('alerts'):listOpen.add('alerts');$('#alertPanel').outerHTML=alertPanel()},
   toggleList(k){listOpen.has(k)?listOpen.delete(k):listOpen.add(k);render()},
   samples(){if(!isAud())return;const had=S.courses.some(c=>c.sample);had?removeSamples():addSamples();save();render();
-    toast(had?'Samples removed':'Samples added · 8 courses, 7 tickets')},
+    toast(had?'Overdue testing removed':'Overdue testing added · 8 courses, 7 tickets')},
   doReset(){if(!isAud())return closeOv();fresh();draft=null;lastImp=null;closeOv();go('courses');toast('All data cleared')},
   startAudit(id,re){const c=course(id);c.lockedBy=user.name;c.lockedAt=Date.now();if(!re)c.auditorStatus='In Progress';
     const last=re?S.audits.filter(a=>a.courseId===id&&a.checklist?.length===8).sort((a,b)=>b.date-a.date)[0]?.checklist:null;
