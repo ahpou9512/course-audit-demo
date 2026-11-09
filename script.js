@@ -1034,19 +1034,20 @@ const A={
   signOut(){if(leaveGuard(()=>A.signOut()))return;
     go('dashboard');closeOv();user=null;lastImp=null;sortK='';sortD=1;try{sessionStorage.removeItem(LOGIN_KEY)}catch(e){}
     filter='all';myF=false;catFilter='';tkF='';auditedF='';search='';page=1;render();window.scrollTo(0,0)},
-  impHistory(){openModal(`<div class="ov-h"><h3>Import history</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+  impHistBack(){imp?.kind?impUpload(imp.kind):impChooser()},
+  impHistory(){impModal(`<div class="ov-h"><h3>Import history</h3><button class="x" data-a="impHistBack" aria-label="Close">×</button></div>
     <div class="ov-b"><div class="tbl-wrap"><table class="imp-tbl"><thead><tr><th>File</th><th>Type</th><th>Courses</th><th>Imported by</th><th></th></tr></thead><tbody>${impHistoryRows()}</tbody></table></div></div>
-    <div class="ov-f"><button class="btn" data-a="close">Close</button></div>`);$('.modal').classList.add('imp-wide')},
+    <div class="ov-f"><button class="btn" data-a="impHistBack">Close</button></div>`);$('.modal').classList.add('imp-wide')},
   dismissImp(){lastImp=null;$('#impBanner')?.remove()},
-  impUndo(id){const b=S.imports.find(x=>x.id===id);if(!b||b.undoneAt||!canUndoImp(b)||!impLeft(id))return;const busy=impWorked(id);
+  impUndo(id){const b=S.imports.find(x=>x.id===id);if(!b||b.undoneAt||!canUndoImp(b)||!impLeft(id))return;const busy=impWorked(id),back=$('[data-a=impHistBack]')?'impHistory':'close';
     if(busy.length){const codes=busy.slice(0,10).map(c=>esc(c.code)).join(', ');
-      return openModal(`<div class="ov-h"><h3>Can't undo this import</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+      return openModal(`<div class="ov-h"><h3>Can't undo this import</h3><button class="x" data-a="${back}" aria-label="Close">×</button></div>
       <div class="ov-b"><p style="margin:0">${busy.length} course${busy.length>1?'s have':' has'} been worked on since it was imported, so undoing would lose that work. Nothing was changed.</p><p class="muted small" style="margin:0">${codes}${busy.length>10?` and ${busy.length-10} more`:''}</p></div>
-      <div class="ov-f"><button class="btn" data-a="close">Close</button></div>`)}
+      <div class="ov-f"><button class="btn" data-a="${back}">Close</button></div>`)}
     const ids=new Set(S.courses.filter(c=>c.importId===id).map(c=>c.id)),tix=S.tickets.filter(t=>ids.has(t.courseId)).length;
-    openModal(`<div class="ov-h"><h3>Undo this import?</h3><button class="x" data-a="close" aria-label="Close">×</button></div>
+    openModal(`<div class="ov-h"><h3>Undo this import?</h3><button class="x" data-a="${back}" aria-label="Close">×</button></div>
     <div class="ov-b"><p style="margin:0">${esc(b.file)}</p><p style="margin:0">This removes ${ids.size} course${ids.size===1?'':'s'}${tix?`, ${tix} ticket${tix===1?'':'s'}`:''} and their audit records. It can't be reversed, but you can import the file again.</p></div>
-    <div class="ov-f"><button class="btn" data-a="close">Keep courses</button><button class="btn danger" data-a="doImpUndo" data-id="${id}">Undo import</button></div>`)},
+    <div class="ov-f"><button class="btn" data-a="${back}">Keep courses</button><button class="btn danger" data-a="doImpUndo" data-id="${id}">Undo import</button></div>`)},
   doImpUndo(id){const b=S.imports.find(x=>x.id===id);if(!b||b.undoneAt||impWorked(id).length)return closeOv();
     const ids=new Set(S.courses.filter(c=>c.importId===id).map(c=>c.id));
     S.courses=S.courses.filter(c=>!ids.has(c.id));S.audits=S.audits.filter(a=>!ids.has(a.courseId));S.tickets=S.tickets.filter(t=>!ids.has(t.courseId));S.logs=S.logs.filter(l=>!ids.has(l.courseId));
@@ -1319,7 +1320,7 @@ document.addEventListener('click',e=>{
   if(A[a]){e.preventDefault();A[a](el.dataset.id)}
 });
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'&&$('#overlay').innerHTML)closeOv();
+  if(e.key==='Escape'&&$('#overlay').innerHTML){const x=$('.modal .x[data-a=impHistBack],.modal .x[data-a=impHistory]');if(x)x.click();else closeOv()}
   // Escape also folds an open ticket form back to its Update button, without saving
   else if(e.key==='Escape'&&editingT)A.cancelT();
   else if(e.key==='Escape'&&focusT)closeFocus();
