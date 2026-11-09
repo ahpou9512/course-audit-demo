@@ -126,7 +126,7 @@ function render(){
   if(editingT&&mine(ticket(editingT)))stashForm(editingT);
   if(view.name==='course'){animTree=animatedFor!==view.id;animatedFor=view.id}else{animTree=false;animatedFor=null}
   const cur=view.name==='course'?'courses':view.name==='auditor'?'team':view.name;
-  $('#tabs').innerHTML=[['dashboard','Dashboard'],['courses','Courses'],['team','Team']] // History tab hidden for now; vHistory() is kept
+  $('#tabs').innerHTML=[['dashboard','Dashboard'],['courses','Courses']] // History and Team tabs hidden for now; vHistory(), vTeam() and vAuditor() are kept
     .map(([k,l])=>`<button class="tab" data-a="go" data-id="${k}" aria-current="${cur===k}">${l}</button>`).join('');
   $('#view').innerHTML=({courses:vCourses,course:vCourse,dashboard:vDash,history:vHistory,team:vTeam,auditor:vAuditor})[view.name]();
   if(view.name==='course'&&draft)renderIssues();
