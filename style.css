@@ -597,3 +597,14 @@ tr.row-in{animation:rowIn .35s ease-out both;animation-delay:calc(var(--i) * 35m
 @keyframes popIn{from{opacity:0;transform:scale(.96) translateY(6px)}}
 @keyframes toastIn{from{opacity:0;transform:translate(-50%,10px)}}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* team: SELM and auditor sections */
+.team-sec{display:flex;flex-direction:column;gap:12px}
+.team-sec-h{display:flex;align-items:center;gap:6px 14px;flex-wrap:wrap}
+.team-sec-h h3{font-size:16px}
+.team-sec-h>.chips-bar{gap:4px}
+.team-sec-h>.chips-bar .fchip{padding:3px 10px;font-size:12.5px}
+.tm-late{margin-left:auto;font-size:12px;font-weight:700;color:var(--bad);background:var(--bad-bg);border-radius:999px;padding:2px 9px}
+.kv div.late b{color:var(--bad)}
+.owned-tbl{min-width:680px}
+.owned-tbl td .muted.small{overflow-wrap:anywhere}

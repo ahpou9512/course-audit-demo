@@ -42,9 +42,11 @@ const slaFrom=t=>t.status==='New'?t.slaStart||t.createdAt:(t.status==='Escalated
 const isOverdue=t=>{const s=slaFrom(t);return !!s&&Date.now()-s>7*DAY};
 // a course waiting for audit has 30 days, counted from when it was added or restored; older data may also say it was queued for re-audit
 const pendingSince=c=>Math.max(c.createdAt||0,...S.logs.filter(l=>l.courseId===c.id&&['Course registered','Course restored','Re-audit queued'].includes(l.action)).map(l=>l.ts));
-const AUDIT_DAYS=30;
-const auditLate=c=>stage(c)==='audit'&&Date.now()-pendingSince(c)>AUDIT_DAYS*DAY;
-function auditFlag(c){if(stage(c)!=='audit')return '';const d=daysSince(pendingSince(c));
+const AUDIT_DAYS=180;
+// a Healthy course whose last full audit is over 180 days old goes back to Pending audit for a re-audit
+const REAUDIT_DAYS=180, dueReaudit=c=>c.health==='Healthy'&&c.auditorStatus==='Completed'&&!!c.lastAudited&&daysSince(c.lastAudited)>REAUDIT_DAYS&&!openOf(c.id).length;
+const auditLate=c=>stage(c)==='audit'&&!dueReaudit(c)&&Date.now()-pendingSince(c)>AUDIT_DAYS*DAY;
+function auditFlag(c){if(stage(c)!=='audit')return '';if(dueReaudit(c))return `<span class="aud-sla">Re-audit due · last audited ${daysSince(c.lastAudited)}d ago</span>`;const d=daysSince(pendingSince(c));
   if(auditLate(c))return `<span class="aud-sla late">${d}d not audited</span>`;
   return `<span class="aud-sla">${AUDIT_DAYS-d>0?`${AUDIT_DAYS-d}d left to audit`:'Last day to audit'}</span>`}
 // a Healthy course whose latest audit had tickets cancelled instead of fixed says so, until the next audit
@@ -72,6 +74,7 @@ const readyToVerify=c=>{const o=openOf(c.id);return o.length>0&&o.every(t=>t.sta
 
 function stage(c){
   if(c.health==='Discontinued')return 'disc';
+  if(dueReaudit(c))return 'audit';
   if(c.auditorStatus==='Pending'||c.lockedBy&&c.auditorStatus!=='Completed')return 'audit';
   if(openOf(c.id).length)return readyToVerify(c)?'verify':'issues';
   return 'healthy';
@@ -81,7 +84,7 @@ function nextStep(c){
   if(st==='audit'){
     if(c.lockedBy&&c.lockedBy!==user.name)return [`Being audited by ${c.lockedBy}`,false];
     if(c.lockedBy)return ['Finish your audit',true];
-    return isAud()?['Start audit',true]:['Waiting for auditor',false];
+    return isAud()?[dueReaudit(c)?'Re-audit':'Start audit',true]:['Waiting for auditor',false];
   }
   if(st==='issues'){const n=o.filter(t=>t.status==='New'||WORKING.includes(t.status)).length, v=o.length-n;
     if(isAud()&&v)return [`${v} ticket${v>1?'s':''} to verify`,true];
@@ -98,7 +101,7 @@ function tone(s){
     'Escalated':'t-info','In Progress':'t-acc','Ready to revalidate':'t-pv',[PV_RES]:'t-pv',[PV_DIS]:'t-pv','Discontinued':'t-gray'})[s]||'t-gray';
 }
 const pill=s=>`<span class="pill ${tone(s)}">${esc(s)}</span>`;
-const healthLabel=c=>stage(c)==='verify'?'Ready to revalidate':c.health;
+const healthLabel=c=>stage(c)==='verify'?'Ready to revalidate':dueReaudit(c)?'Pending Audit':c.health;
 const shortStatus=s=>({[PV_RES]:'Verify fix',[PV_DIS]:'Verify cancel'})[s]||s;
 
 function save(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}}
@@ -126,7 +129,7 @@ function render(){
   if(editingT&&mine(ticket(editingT)))stashForm(editingT);
   if(view.name==='course'){animTree=animatedFor!==view.id;animatedFor=view.id}else{animTree=false;animatedFor=null}
   const cur=view.name==='course'?'courses':view.name==='auditor'?'team':view.name;
-  $('#tabs').innerHTML=[['dashboard','Dashboard'],['courses','Courses']] // History and Team tabs hidden for now; vHistory(), vTeam() and vAuditor() are kept
+  $('#tabs').innerHTML=[['dashboard','Dashboard'],['courses','Courses'],['team','Team']] // History tab hidden for now; vHistory() is kept
     .map(([k,l])=>`<button class="tab" data-a="go" data-id="${k}" aria-current="${cur===k}">${l}</button>`).join('');
   $('#view').innerHTML=({courses:vCourses,course:vCourse,dashboard:vDash,history:vHistory,team:vTeam,auditor:vAuditor})[view.name]();
   if(view.name==='course'&&draft)renderIssues();
@@ -195,8 +198,8 @@ const tkKeep=t=>(!catFilter||t.category===catFilter)&&(!myF||!canWork()||t.escal
 const tkHit=t=>tkKeep(t)&&(!tkF||tkMatch(t));
 // while the cycle is still open, tickets already approved stay listed with a check mark
 const shownOf=c=>openOf(c.id).length?ticketsOf(c.id).filter(t=>t.status!==CLOSED||t.auditId===c.cycleAuditId):[];
-// a Healthy course that hasn't been audited for 180 days is due for another look
-const REAUDIT_DAYS=180, auditOld=c=>stage(c)==='healthy'&&!!c.lastAudited&&daysSince(c.lastAudited)>REAUDIT_DAYS;
+// its last audited date turns amber while it waits
+const auditOld=dueReaudit;
 const AUDITED_OPTS=[['never','Never audited'],['7','Last 7 days'],['30','Last 30 days'],['old','Over 30 days ago'],['180','Over 180 days ago']];
 const fsel=(id,cur,all,opts,label)=>`<select id="${id}" class="${cur?'on':''}" aria-label="${label}"><option value="">${all}</option>${opts.map(([v,l])=>`<option value="${esc(v)}"${cur===v?' selected':''}>${esc(l)}</option>`).join('')}</select>`;
 function auditedOk(c){
@@ -287,7 +290,7 @@ function vCourse(){
   const runs=S.audits.filter(a=>a.courseId===c.id).sort((a,b)=>b.date-a.date);
   let btn='';
   if(c.lockedBy&&c.lockedBy!==user.name)btn=`<span class="muted small">🔒 Being audited by ${esc(c.lockedBy)}</span>`;
-  else if(st==='audit'&&isAud()&&!c.lockedBy)btn=`<button class="btn primary" data-a="startAudit" data-id="${c.id}">Start audit</button>`;
+  else if(st==='audit'&&isAud()&&!c.lockedBy)btn=dueReaudit(c)?`<button class="btn primary" data-a="reaudit" data-id="${c.id}">Re-audit</button>`:`<button class="btn primary" data-a="startAudit" data-id="${c.id}">Start audit</button>`;
   else if(st==='healthy'&&!c.lockedBy&&isAud())btn=`<button class="btn" data-a="reaudit" data-id="${c.id}">Re-audit</button>`;
   else if(st==='audit'&&!isAud())btn=`<span class="muted small">Waiting for an auditor</span>`;
   const stats=`<div class="stats"><span>Audits <b>${fullAudits(c).length}</b></span><span${auditOld(c)?' class="audit-old"':''}>Last audited <b>${fmtD(c.lastAudited)}</b>${c.lastAudited?` (${daysSince(c.lastAudited)}d ago)`:''}</span>
@@ -295,7 +298,7 @@ function vCourse(){
   return `<button class="link back" data-a="go" data-id="courses">← All courses</button>
   <div class="panel cover${st==='disc'?' gone':''}"><div class="chead"><div style="display:flex;flex-direction:column;gap:6px">
       <span class="mono muted">${esc(c.code)} · ${esc(c.type)}${open.length?` · ${open.length} open issue${open.length>1?'s':''}`:''}</span><h2>${esc(c.name)}</h2>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${pill(healthLabel(c))}${st==='audit'&&c.health==='Healthy'?pill('Re-audit queued'):''}${auditFlag(c)}${cancelFlag(c)}${discInfo(c)}</div></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${pill(healthLabel(c))}${auditFlag(c)}${cancelFlag(c)}${discInfo(c)}</div></div>
       <div class="chead-act">${isOwner()&&st!=='disc'?`<button class="btn" data-a="editCourse" data-id="${c.id}">Edit course</button>`:''}${btn}${(isAud()||isOwner())&&st!=='disc'?(!runs.length&&!ticketsOf(c.id).length?(c.lockedBy?'':`<button class="btn danger" data-a="delCourse" data-id="${c.id}">Delete course</button>`)
         :`<button class="btn danger" data-a="discCourse" data-id="${c.id}">Discontinue course</button>`):''}${isAud()&&st==='disc'?`<button class="btn" data-a="restoreCourse" data-id="${c.id}">Restore course</button>`:''}</div></div>
     ${stats}</div>
@@ -658,20 +661,58 @@ function auditorStats(name){
 }
 const periodChips=()=>`<div class="chips-bar">${[['month','This month'],['all','All time']].map(([k,l])=>`<button class="fchip" data-a="teamP" data-id="${k}" aria-pressed="${teamP===k}">${l}</button>`).join('')}</div>`;
 const avatar=(u,cls)=>`<span class="avatar${cls?' '+cls:''}" aria-hidden="true">${esc(u.name[0])}</span>`;
+// Team: which tickets each SELM holds, so someone can cover while they are away, and what each auditor did
+const tkLabel=t=>t.status===PV_RES?'Waiting for verification':t.status===PV_DIS?'Waiting for verification (cancel)':t.status;
+function ownerStats(name){
+  const open=S.tickets.filter(t=>t.status!==CLOSED&&t.escalatedBy===name),by=st=>open.filter(t=>t.status===st).length;
+  return {open,late:open.filter(t=>WORKING.includes(t.status)&&tkFlag(t)),esc:by('Escalated'),prog:by('In Progress'),failed:by('Retest Failed'),
+    wait:open.filter(t=>t.status===PV_RES||t.status===PV_DIS).length,
+    takenFrom:S.logs.filter(l=>l.action==='Taken over'&&l.detail===`from ${name}`&&Date.now()-l.ts<30*DAY),
+    last:Math.max(0,...S.logs.filter(l=>l.actor===name&&l.ticketId).map(l=>l.ts))||null}}
+// late tickets first, then the nearest fix date
+function ownedTable(list){
+  const late=t=>WORKING.includes(t.status)&&tkFlag(t)?1:0,sorted=[...list].sort((a,b)=>late(b)-late(a)||(a.fixDate||9e15)-(b.fixDate||9e15));
+  return `<div class="tbl-wrap"><table class="owned-tbl"><thead><tr><th>Ticket</th><th>Course</th><th>Status</th><th>Fix date</th><th></th></tr></thead><tbody>${sorted.map(t=>{
+    const c=course(t.courseId),f=WORKING.includes(t.status)?tkFlag(t):'';
+    return `<tr><td><span class="mono">${esc(t.id)}</span><div class="muted small">${esc(t.category)} · ${esc(t.detail)}</div></td>
+      <td>${c?`<button class="link mono" data-a="open" data-id="${c.id}">${esc(c.code)}</button><div class="muted small">${esc(c.name)}</div>`:'—'}</td>
+      <td class="nowrap">${esc(tkLabel(t))}${f?`<span class="aud-sla late">${esc(f)}</span>`:''}</td>
+      <td class="mono nowrap">${t.fixDate?fmtD(t.fixDate):'—'}</td>
+      <td class="nowrap">${canWork()&&WORKING.includes(t.status)&&t.escalatedBy!==user.name?`<button class="btn sm" data-a="takeOver" data-id="${t.id}"><span aria-hidden="true">⇄</span> Take over</button>`:''}</td></tr>`}).join('')}</tbody></table></div>`}
+function ownedPanel(u){const s=ownerStats(u.name);
+  const taken=s.takenFrom.length?`<div class="panel"><h3>Taken over from ${esc(u.name)} (last 30 days)</h3><div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Ticket</th><th>Course</th><th>Taken by</th></tr></thead><tbody>${
+    [...s.takenFrom].sort((a,b)=>b.ts-a.ts).map(l=>{const c=course(l.courseId);return `<tr><td class="mono nowrap">${fmtD(l.ts)}</td><td class="mono">${esc(l.ticketId)}</td>
+      <td>${c?`<button class="link mono" data-a="open" data-id="${c.id}">${esc(c.code)}</button>`:'—'}</td><td>${esc(l.actor)}</td></tr>`}).join('')}</tbody></table></div></div>`:'';
+  return `<div class="panel"><h3>Open tickets (${s.open.length})</h3>${s.open.length?ownedTable(s.open):'<span class="muted">No open tickets.</span>'}</div>${taken}`}
+function vSelm(u){const s=ownerStats(u.name),k=(v,l,cls)=>`<div${cls?` class="${cls}"`:''}><b>${v}</b><span>${l}</span></div>`;
+  return `<button class="link back" data-a="go" data-id="team">← Team</button>
+  <div class="panel"><div class="tm-top">${avatar(u,'lg')}<div><h2>${esc(u.name)}${u.id===user.id?'<span class="you">You</span>':''}</h2><span class="muted small">SELM · last active ${fmtD(s.last)}</span></div></div>
+    <div class="kv">${k(s.open.length,'Open tickets')}${k(s.esc,'Escalated')}${k(s.prog,'In Progress')}${k(s.failed,'Retest Failed')}${k(s.wait,'Waiting for verification')}${k(s.late.length,'Late',s.late.length?'late':'')}</div></div>
+  ${ownedPanel(u)}`}
 function vTeam(){
-  const rows=USERS.filter(u=>u.role==='Auditor').map(u=>({u,s:auditorStats(u.name)})).sort((a,b)=>b.s.audits-a.s.audits||b.s.verified-a.s.verified);
+  const you=u=>u.id===user.id?'<span class="you">You</span>':'';
+  const selms=USERS.filter(u=>u.role==='SELM').map(u=>({u,s:ownerStats(u.name)}));
+  const rows=USERS.filter(u=>u.role==='Auditor').map(u=>({u,s:auditorStats(u.name),o:ownerStats(u.name).open.length})).sort((a,b)=>b.s.audits-a.s.audits||b.s.verified-a.s.verified);
   const max=Math.max(1,...rows.map(r=>r.s.audits));
-  return `<div class="head"><h2>Team</h2>${periodChips()}</div>
-  <p class="muted small" style="margin:0">Audits each auditor submitted ${teamP==='month'?'this month':'so far'}. Open a card to see their profile.</p>
-  <div class="team">${rows.map(({u,s},i)=>`<button class="tm-card" data-a="openAuditor" data-id="${u.id}">
-    <div class="tm-top">${avatar(u)}<div><b>${esc(u.name)}${u.id===user.id?'<span class="you">You</span>':''}</b><span class="muted small">Last audit ${fmtD(s.last)}</span></div>${s.audits?`<span class="tm-rank">#${i+1}</span>`:''}</div>
+  return `<div class="head"><h2>Team</h2></div>
+  <section class="team-sec"><div class="team-sec-h"><h3>SELMs</h3><span class="muted small">Open tickets each SELM holds. Open a card to see them, and take over while someone is away.</span></div>
+  <div class="team">${selms.map(({u,s})=>`<button class="tm-card" data-a="openAuditor" data-id="${u.id}">
+    <div class="tm-top">${avatar(u)}<div><b>${esc(u.name)}${you(u)}</b><span class="muted small">Last active ${fmtD(s.last)}</span></div>${s.late.length?`<span class="tm-late">${s.late.length} late</span>`:''}</div>
+    <div class="tm-big"><b>${s.open.length}</b><span>open ticket${s.open.length===1?'':'s'}</span></div>
+    <div class="tm-kv"><span><b>${s.esc}</b> Escalated</span><span><b>${s.prog}</b> In Progress</span><span><b>${s.failed}</b> Retest Failed</span><span><b>${s.wait}</b> Waiting for verification</span></div>
+    ${s.takenFrom.length?`<span class="muted small">${s.takenFrom.length} taken over by others in the last 30 days</span>`:''}
+  </button>`).join('')}</div></section>
+  <section class="team-sec"><div class="team-sec-h"><h3>Auditors</h3>${periodChips()}<span class="muted small">Audits each auditor submitted ${teamP==='month'?'this month':'so far'}.</span></div>
+  <div class="team">${rows.map(({u,s,o},i)=>`<button class="tm-card" data-a="openAuditor" data-id="${u.id}">
+    <div class="tm-top">${avatar(u)}<div><b>${esc(u.name)}${you(u)}</b><span class="muted small">Last audit ${fmtD(s.last)}</span></div>${s.audits?`<span class="tm-rank">#${i+1}</span>`:''}</div>
     <div class="tm-big"><b>${s.audits}</b><span>audit${s.audits===1?'':'s'}</span></div>
     <div class="track"><div class="fill" style="width:${s.audits/max*100}%"></div></div>
-    <div class="tm-kv"><span><b>${s.courses}</b> course${s.courses===1?'':'s'}</span><span><b>${s.issues}</b> issue${s.issues===1?'':'s'} raised</span><span><b>${s.verified}</b> fix${s.verified===1?'':'es'} verified</span></div>
-  </button>`).join('')}</div>`;
+    <div class="tm-kv"><span><b>${s.courses}</b> course${s.courses===1?'':'s'}</span><span><b>${s.issues}</b> issue${s.issues===1?'':'s'} raised</span><span><b>${s.verified}</b> fix${s.verified===1?'':'es'} verified</span>${o?`<span><b>${o}</b> open ticket${o===1?'':'s'}</span>`:''}</div>
+  </button>`).join('')}</div></section>`;
 }
 function vAuditor(){
-  const u=USERS.find(x=>x.id===view.id&&x.role==='Auditor')||USERS[0], s=auditorStats(u.name);
+  const u=USERS.find(x=>x.id===view.id)||USERS[0];if(u.role==='SELM')return vSelm(u);
+  const s=auditorStats(u.name),own=ownerStats(u.name);
   const all=S.audits.filter(a=>a.auditor===u.name).sort((a,b)=>b.date-a.date),listed=all.filter(a=>a.note!==REVERIFY);
   // audits per month over the last six months, oldest first
   const n=new Date(), per=[...Array(6)].map((_,i)=>{const m=new Date(n.getFullYear(),n.getMonth()-5+i,1),end=new Date(m.getFullYear(),m.getMonth()+1,1).getTime();
@@ -680,6 +721,7 @@ function vAuditor(){
   return `<button class="link back" data-a="go" data-id="team">← Team</button>
   <div class="panel"><div class="tm-top">${avatar(u,'lg')}<div><h2>${esc(u.name)}${u.id===user.id?'<span class="you">You</span>':''}</h2><span class="muted small">${u.role} · last audit ${fmtD(s.last)}</span></div>${periodChips()}</div>
     <div class="kv">${k(s.audits,'Audits')}${k(s.courses,'Courses audited')}${k(s.issues,'Issues raised')}${k(s.verified,'Fixes verified')}</div></div>
+  ${own.open.length||own.takenFrom.length?ownedPanel(u):''}
   <div class="panel"><h3>Audits per month</h3><div class="bars">${per.map(([l,v])=>`<div class="bar"><span class="mono">${l}</span><div class="track"><div class="fill" style="width:${v/max*100}%"></div></div><span class="v">${v}</span></div>`).join('')}</div></div>
   <div class="panel"><h3>All audits (${listed.length})</h3>${listed.length?`<div class="tbl-wrap"><table><thead><tr><th>Date</th><th>Course</th><th>Result</th><th>Issues</th></tr></thead><tbody>
     ${listed.map(a=>{const c=course(a.courseId);return `<tr><td class="mono nowrap">${fmtD(a.date)}</td><td>${c?`<button class="link mono" data-a="open" data-id="${c.id}">${esc(c.code)}</button> <span class="muted small">${esc(c.name)}</span>`:'<span class="muted">Deleted course</span>'}</td>
@@ -745,7 +787,7 @@ function addSamples(){const now=Date.now(),ago=d=>now-d*DAY,price=299;
       if(x.esc)at(x.esc,x.by,'Escalated','');
       (x.moves||[]).forEach(m=>{at(m.d,x.by,'Fix date changed',`${week(ago(m.from))} → ${week(ago(m.to))} (${fmtD(ago(m.to))})`);at(m.d,x.by,'Note added',m.note);t.notes.push({ts:ago(m.d),by:x.by,text:m.note})})})};
   // waiting for their first audit: one past the deadline, one still inside it
-  [['TEST-104','Test: not audited yet',35],['TEST-105','Test: added recently',2]].forEach(([code,name,d])=>{
+  [['TEST-104','Test: not audited yet',190],['TEST-105','Test: added recently',2]].forEach(([code,name,d])=>{
     const c={id:'C'+S.seq.c++,sample:true,code,name,type:'ILT',price:null,audience:'',health:'Pending Audit',auditorStatus:'Pending',auditCount:0,lastAudited:null,lastAuditor:null,lockedBy:null,lockedAt:null,cycleAuditId:null,createdAt:ago(d)};
     S.courses.push(c);log({ts:ago(d),actor:'Rick',courseId:c.id,action:'Course registered',detail:'Manual entry'})});
   // Healthy courses for the Over 180 days ago filter: two past it, one still inside it
@@ -968,8 +1010,9 @@ const impCalm=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
 const impWait=ms=>impCalm()?Promise.resolve():new Promise(r=>setTimeout(r,ms));
 const impStep=(state,text,sub='')=>`<div class="imp-step ${state}"><i aria-hidden="true"></i><span>${esc(text)}</span>${sub?`<small>${esc(sub)}</small>`:''}</div>`;
 function impFacts(kind,ready){const n=ready.length;if(kind==='new')return `<div class="imp-fact"><b>${n}</b><span>Pending audit</span></div>`;
-  const failed=ready.filter(x=>x.failed),gone=ready.filter(x=>x.disc).length,pass=n-failed.length-gone,tix=failed.reduce((s,x)=>s+x.issues.length,0);
-  return `<div class="imp-fact"><b>${pass}</b><span>Healthy</span></div><div class="imp-fact"><b>${failed.length}</b><span>Unhealthy</span></div>${gone?`<div class="imp-fact"><b>${gone}</b><span>Discontinued</span></div>`:''}<div class="imp-fact"><b>${tix}</b><span>Tickets to open</span></div>`}
+  const failed=ready.filter(x=>x.failed),gone=ready.filter(x=>x.disc).length,tix=failed.reduce((s,x)=>s+x.issues.length,0);
+  const due=ready.filter(x=>!x.failed&&!x.disc&&x.date&&daysSince(x.date)>REAUDIT_DAYS).length,pass=n-failed.length-gone-due;
+  return `<div class="imp-fact"><b>${pass}</b><span>Healthy</span></div>${due?`<div class="imp-fact"><b>${due}</b><span>Re-audit due</span></div>`:''}<div class="imp-fact"><b>${failed.length}</b><span>Unhealthy</span></div>${gone?`<div class="imp-fact"><b>${gone}</b><span>Discontinued</span></div>`:''}<div class="imp-fact"><b>${tix}</b><span>Tickets to open</span></div>`}
 async function impRead(input){const file=input.files[0],kind=imp?.kind;if(!file||!kind)return;
   const fail=m=>impUpload(kind,m);
   if(!/\.(xlsx|csv)$/i.test(file.name))return fail('Choose an .xlsx or .csv file.');
@@ -1233,6 +1276,7 @@ const A={
   doTakeOver(id){const t=ticket(id);closeOv();
     if(!WORKING.includes(t.status)||mine(t))return toast(`${id} has changed; nothing to take over`);
     const from=t.escalatedBy;t.escalatedBy=user.name;tlog(t,'Taken over',`from ${from}`);save();refreshMine();
+    if(view.name!=='course'){render();return toast(`${id} is now yours`)}
     // the new owner goes straight to the form, like after escalating
     const prev=editingT;editingT=id;if(prev&&prev!==id)swapSelm(prev,false);
     swapCard(id,true)?.querySelector('.tk-form')?.classList.add('enter');toast(`${id} is now yours`)},

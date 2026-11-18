@@ -239,7 +239,7 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 |---|---|---|
 | 谁可以用 | Auditor、Course Owner | 只有 Auditor，因为会写入 audit 结果 |
 | 模板栏位 | Course Code、Course Name、Type | 前三栏，加 Course Status、Docebo Price、Audience、8 项 criteria、Audit Owner、Audit Date、Audit Note、Issue、Category，共 19 栏 |
-| 导入后 | `Pending Audit`，等 audit 的 30 天从导入时算 | `Course Status = Discontinued` 就下架；否则有 `No` 是 `Unhealthy` 并开 `New` ticket；都不是就 `Healthy`，`AuditCount = 1` |
+| 导入后 | `Pending Audit`，等 audit 的 180 天从导入时算 | `Course Status = Discontinued` 就下架；否则有 `No` 是 `Unhealthy` 并开 `New` ticket；都不是就 `Healthy`，`AuditCount = 1` |
 
 - 这些都算错误，会挡下整个文件，并逐项列出行号、课程、栏位、文件里的值和问题：系统里已有的 Course Code（包括 Discontinued）、文件里重复的 Course Code、资料不合规则的行。
 - Existing 文件里同一个 Course Code 的后续行只能加 issue：其他栏位可以留空或和第一行相同；填了不同的值，就算 Course Code 重复，整个文件不能导入。这是模板唯一允许重复 Course Code 的情况，因为一门课有多个 issue。
@@ -276,7 +276,7 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 - Audit 提交成功才写入课程的 `DoceboPrice` 和 `COURSE_AUDIENCES`；验证失败或取消都不改课程。
 - 还有 ticket 没关时，这次 audit 至少要留一个 `No`。
 - 全部 ticket 都修好（`ClosedAs = Resolved`）后，自动建一次 re-verification audit（`IsReverification = true`），答案全部是 `Yes`，原本 `N/A` 的保持 `N/A`。它只确认修好的问题，所以 Last audited 不算它，只算最新一次 `IsReverification = false` 的 audit，也包括 Failed。
-- 课程等 audit 是 30 天：停在 Pending audit 超过 30 天就算超时。从课程新增或 restore（`COURSES.CreatedAt` 或 `ACTIVITY_LOGS` 里最新的 `Course registered`、`Course restored`）开始算，不用新字段。
+- 新课程等 audit 是 180 天：停在 Pending audit 超过 180 天就算超时。从课程新增或 restore（`COURSES.CreatedAt` 或 `ACTIVITY_LOGS` 里最新的 `Course registered`、`Course restored`）开始算，不用新字段。
 - Ticket 的 SLA 有两段，都是 7 天：`Status = New` 且 `SlaStartAt`（空的话用 `CreatedAt`）超过 7 天（还没 escalate）；`Status` 是 `Escalated` 或 `Retest Failed`、`FixDate` 是空的、而且 `EscalatedAt` 超过 7 天（还没填 fix date）。这两种在 Dashboard 分开计数、分开提醒。
 - 一门课同一时间只能有一个人 audit（`LockedById`）；中途离开或取消就放弃这次 audit、解除锁定，不留记录；锁太久没提交（例如超过一天）也要自动解除。
 - 这一轮还有 open ticket 时，Auditor 可以补开 ticket：`AuditId` 是这一轮的 audit，`CreatedById` 是补开的人，`ACTIVITY_LOGS` 记 `Added after audit`。
@@ -298,8 +298,8 @@ Courses 页的 Import 有两种，都用模板文件（`.xlsx` 或 `.csv`），�
 - Audit 数字：课程页、Status report 和 Team 页都只算 `IsReverification = false` 的 audit，所以数字一致。Re-verification 还是留在 Audit history，但不编号。修好的数量看 `Ticket closed`。
 - 这一轮只要有 ticket 是 `ClosedAs = Cancelled`，全部关闭后课程还是变 `Healthy`，但不建 re-verification audit，答案保持原样，`ACTIVITY_LOGS` 记 `Closed with cancelled tickets`，画面显示取消的数量，直到下一次完整 audit。
 - 长度和金额上限：Course Code 和 Learning Plan Code 最多 50 个字符，Course Name 最多 200 个字符，Docebo Price 是 0 到 99,999,999.99。Add course、编辑课程、audit 和导入都一样。导入的 Audience 重复写只算一个。
-- Last audited 和 180 天：都用最新一次 `IsReverification = false` 的 `AUDITS.AuditedAt` 算，不用存。超过 180 天（第 180 天当天不算）可以用 `Over 180 days ago` 筛选；只有 `Healthy` 的课程会变琥珀色。这个不改变课程状态，也不开 ticket，要 Auditor 自己筛选后做 re-audit。
-- Dashboard 有 Needs attention 表，把超时的项目放在一起，最久的排最前面：等 audit 超过 30 天、没 escalate 超过 7 天、没 fix date 超过 7 天、ETA missed。每行显示课程、ticket、负责人和超时天数，可以按类型筛选。都用查询算，不用新字段。
+- Last audited 和 180 天：都用最新一次 `IsReverification = false` 的 `AUDITS.AuditedAt` 算，不用存。`Healthy` 的课程上次完整 audit 超过 180 天（第 180 天当天不算），画面上就自动显示为 `Pending Audit`，并标出 “Re-audit due”，Auditor 按 Re-audit（会带入上次的答案）。这是用查询算的，不改 `COURSES.Health`，也不开 ticket，不算进 Needs attention。也可以用 `Over 180 days ago` 筛选。
+- Dashboard 有 Needs attention 表，把超时的项目放在一起，最久的排最前面：新课程等 audit 超过 180 天、没 escalate 超过 7 天、没 fix date 超过 7 天、ETA missed。每行显示课程、ticket、负责人和超时天数，可以按类型筛选。都用查询算，不用新字段。
 - Dashboard 有 Fix date changes 表：列出还没关、改过 `FixDate` 的 ticket，显示次数、`FirstFixDate`、现在的 `FixDate` 和最近一次的原因（最近一次 `Fix date changed` 之后的那笔 `Note added`）。都用查询算，不用新字段。
 - ETA missed：`Status` 是 `In Progress` 或 `Retest Failed`，而且今天已经过了 `FixDate`。不用存，查询时算，Dashboard 和 ticket 上都要显示。
 - Cancel ticket 一定要写原因（存在 `Justification`），Auditor 确认后 `ClosedAs = Cancelled`，课程不会下架。
