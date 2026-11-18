@@ -642,7 +642,7 @@ function vDash(){
   <div class="panel"><div class="panel-h"><h3>Status report</h3>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end"><label class="field"><span>From</span><input type="date" id="rFrom" value="${toInput(from)}"></label>
     <label class="field"><span>To</span><input type="date" id="rTo" value="${toInput(to)}"></label>
-    <button class="btn sm" data-a="rToday">Today</button><button class="btn sm" data-a="rWeek">7 days</button></div></div>
+    <button class="btn sm" data-a="rToday">Today</button><button class="btn sm" data-a="rWeek">7 days</button>${isAud()?'<button class="btn sm primary" data-a="exportReport">Export</button>':''}</div></div>
     <div class="kv"><div><b>${cnt('Audit passed')}</b><span>Audits passed</span></div><div><b>${cnt('Audit failed')}</b><span>Audits failed</span></div>
     <div><b>${inR.reduce((n,l)=>n+(l.ticketIds?.length||0),0)+cnt('Added after audit')}</b><span>Tickets opened</span></div><div><b>${cnt('Escalated')}</b><span>Escalated</span></div>
     <div><b>${cnt('Ticket closed')}</b><span>Tickets closed</span></div><div><b>${inR.filter(l=>l.action==='Ticket closed'&&/self-approved/.test(l.detail)).length}</b><span>Self-approved</span></div><div><b>${cnt('Retest failed')+cnt('Cancellation rejected')+cnt('Discontinuation rejected')}</b><span>Sent back</span></div></div></div>`;
@@ -1004,6 +1004,44 @@ async function impDownload(kind,what){
   if(dl){try{await dl.save({filename:name,data:new Blob([data])})}catch(e){if(e?.code!=='declined')toast("That file couldn't be saved here.")}return}
   if(window.claude?.use)return toast("Downloads aren't available in this view.");
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
+// Status report export: the numbers for the chosen dates, what got fixed, and what is still open
+async function saveBook(name,wb){
+  const data=XLSX.write(wb,{type:'array',bookType:'xlsx'});
+  // inside a Claude artifact the file goes through its download prompt, like the import templates
+  const dl=window.claude?.use?await window.claude.use('downloads'):null;
+  if(dl){try{await dl.save({filename:name,data:new Blob([data])});return true}catch(e){if(e?.code!=='declined')toast("That file couldn't be saved here.");return false}}
+  if(window.claude?.use){toast("Downloads aren't available in this view.");return false}
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);return true}
+function sheetOf(aoa,widths){const ws=XLSX.utils.aoa_to_sheet(aoa);ws['!cols']=widths.map(w=>({wch:w}));return ws}
+async function exportReport(){
+  if(!isAud())return;
+  try{await loadXlsx()}catch(e){return toast("Couldn't load the Excel library. Check your connection.")}
+  const from=rptFrom??dayStart(Date.now()-6*DAY), to=rptTo??dayStart(Date.now());
+  if(from>to)return toast('The From date is after the To date. Change the dates first.');
+  const inR=S.logs.filter(l=>l.ts>=from&&l.ts<to+DAY), cnt=a=>inR.filter(l=>l.action===a).length;
+  const closedL=inR.filter(l=>l.action==='Ticket closed'), asOf=l=>ticket(l.ticketId)?.closedAs||(/Cancelled/.test(l.detail)?'Cancelled':'Resolved');
+  const fixed=closedL.filter(l=>asOf(l)==='Resolved').length, opened=inR.reduce((n,l)=>n+(l.ticketIds?.length||0),0)+cnt('Added after audit');
+  const open=S.tickets.filter(t=>t.status!==CLOSED), st=s=>open.filter(t=>t.status===s).length, live=S.courses.filter(c=>stage(c)!=='disc');
+  const summary=[['Course Audit Central status report'],[],['From',fmtD(from)],['To',fmtD(to)],['Exported',`${fmtDT(Date.now())} by ${user.name}`],[],
+    ['In this period','Count'],['Audits passed',cnt('Audit passed')],['Audits failed',cnt('Audit failed')],['Tickets opened',opened],['Tickets escalated',cnt('Escalated')],
+    ['Tickets fixed (closed as resolved)',fixed],['Tickets cancelled',closedL.length-fixed],['Self-approved',closedL.filter(l=>/self-approved/.test(l.detail)).length],
+    ['Sent back',cnt('Retest failed')+cnt('Cancellation rejected')+cnt('Discontinuation rejected')],[],
+    ['Open tickets now','Count'],['New',st('New')],['Escalated',st('Escalated')],['In Progress',st('In Progress')],['Retest Failed',st('Retest Failed')],
+    ['Waiting for verification',open.filter(t=>t.status===PV_RES||t.status===PV_DIS).length],['Total open',open.length],['Late',open.filter(t=>tkFlag(t)).length],[],
+    ['Courses now','Count'],['Healthy',live.filter(c=>stage(c)==='healthy').length],['Unhealthy',live.filter(c=>stage(c)==='issues').length],
+    ['Ready to revalidate',live.filter(c=>stage(c)==='verify').length],['Pending audit',live.filter(c=>stage(c)==='audit').length],['Re-audit due (part of Pending audit)',live.filter(dueReaudit).length],['Total',live.length]];
+  const row=t=>{const c=course(t.courseId);return [t.id,c?.code||'',c?.name||'',t.category,t.detail]};
+  const closed=[['Ticket','Course code','Course name','Category','Issue','Raised','Handled by','Closed','Closed as','Approved by','Self-approved','Days open'],
+    ...[...closedL].sort((a,b)=>a.ts-b.ts).map(l=>{const t=ticket(l.ticketId);if(!t)return [l.ticketId,'','','','','','',fmtD(l.ts),asOf(l),l.actor,'',''];
+      return [...row(t),fmtD(t.createdAt),t.escalatedBy||'',fmtD(l.ts),asOf(l),l.actor,/self-approved/.test(l.detail)?'Yes':'No',Math.max(0,Math.round((l.ts-t.createdAt)/DAY))]})];
+  const openRows=[['Ticket','Course code','Course name','Category','Issue','Status','Owner','Raised','Fix date','Late'],
+    ...[...open].sort((a,b)=>a.createdAt-b.createdAt).map(t=>[...row(t),tkLabel(t),t.escalatedBy||'Not assigned',fmtD(t.createdAt),t.fixDate?fmtD(t.fixDate):'',tkFlag(t)||''])];
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,sheetOf(summary,[36,22]),'Summary');
+  XLSX.utils.book_append_sheet(wb,sheetOf(closed,[11,16,30,18,36,12,14,12,11,14,13,10]),'Tickets closed');
+  XLSX.utils.book_append_sheet(wb,sheetOf(openRows,[11,16,30,18,36,24,14,12,12,22]),'Open tickets');
+  if(!await saveBook(`status-report-${toInput(from)}-to-${toInput(to)}.xlsx`,wb))return;
+  toast(`Status report exported · ${fixed} fixed, ${open.length} still open`)}
 // the import box changes its contents in place, so moving between steps doesn't flash the whole box
 function impModal(html){const m=$('.modal');if(!m)return openModal(html);m.className='modal swap';m.innerHTML=html}
 const impCalm=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1355,6 +1393,7 @@ const A={
   fold(k){fold[k]=!fold[k];try{localStorage.setItem(FOLD_KEY,JSON.stringify(fold))}catch(e){}
     $('#fold-'+k).classList.toggle('shut',!!fold[k]);$(`.fold-btn[data-id=${k}]`).setAttribute('aria-expanded',!fold[k])},
   rToday(){rptFrom=rptTo=dayStart(Date.now());render()},
+  exportReport(){exportReport()},
   rWeek(){rptFrom=dayStart(Date.now()-6*DAY);rptTo=dayStart(Date.now());render()},
 };
 
